@@ -38,6 +38,10 @@ create table public.resorts (
   center_lat double precision generated always as (ST_Y(center::geometry)) stored,
   center_lng double precision generated always as (ST_X(center::geometry)) stored,
   default_zoom smallint not null default 19,
+  -- Optional target used purely for progress display in the satellite
+  -- capture tool ("142 of 352 homes captured"). Left null for resorts
+  -- where staff don't know/want to track a total.
+  total_homes smallint,
   entrance_node_id uuid,
   created_by uuid references public.staff_profiles(id),
   created_at timestamptz not null default now(),

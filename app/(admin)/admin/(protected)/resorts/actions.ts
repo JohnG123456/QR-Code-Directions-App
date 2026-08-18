@@ -65,11 +65,13 @@ const updateResortSchema = z.object({
   centerLat: z.coerce.number().min(-90).max(90).nullable(),
   centerLng: z.coerce.number().min(-180).max(180).nullable(),
   defaultZoom: z.coerce.number().int().min(1).max(22),
+  totalHomes: z.coerce.number().int().min(1).max(5000).nullable(),
 });
 
 export async function updateResort(formData: FormData) {
   const rawLat = formData.get("centerLat");
   const rawLng = formData.get("centerLng");
+  const rawTotalHomes = formData.get("totalHomes");
 
   const parsed = updateResortSchema.safeParse({
     resortId: formData.get("resortId"),
@@ -79,6 +81,7 @@ export async function updateResort(formData: FormData) {
     centerLat: rawLat ? rawLat : null,
     centerLng: rawLng ? rawLng : null,
     defaultZoom: formData.get("defaultZoom") || 19,
+    totalHomes: rawTotalHomes ? rawTotalHomes : null,
   });
 
   if (!parsed.success) {
@@ -99,6 +102,7 @@ export async function updateResort(formData: FormData) {
       slug: parsed.data.slug,
       is_published: parsed.data.isPublished,
       default_zoom: parsed.data.defaultZoom,
+      total_homes: parsed.data.totalHomes,
       center,
     })
     .eq("id", parsed.data.resortId);

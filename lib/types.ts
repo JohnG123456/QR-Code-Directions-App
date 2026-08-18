@@ -12,6 +12,7 @@ export interface Resort {
   center_lat: number | null;
   center_lng: number | null;
   default_zoom: number;
+  total_homes: number | null;
   entrance_node_id: string | null;
   entrance_lat: number | null;
   entrance_lng: number | null;

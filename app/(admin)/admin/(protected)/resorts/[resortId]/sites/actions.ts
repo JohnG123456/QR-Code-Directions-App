@@ -156,3 +156,42 @@ export async function deleteSite(formData: FormData) {
   if (error) throw new Error(error.message);
   revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
 }
+
+const updateSiteLocationSchema = z.object({
+  siteId: z.string().uuid(),
+  resortId: z.string().uuid(),
+  lat: z.coerce.number().min(-90).max(90),
+  lng: z.coerce.number().min(-180).max(180),
+});
+
+// Used when a staff member drags an existing pin to correct its position
+// on the satellite capture map.
+export async function updateSiteLocation(
+  _prevState: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const parsed = updateSiteLocationSchema.safeParse({
+    siteId: formData.get("siteId"),
+    resortId: formData.get("resortId"),
+    lat: formData.get("lat"),
+    lng: formData.get("lng"),
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("sites")
+    .update({
+      location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})`,
+    })
+    .eq("id", parsed.data.siteId);
+
+  if (error) return { error: error.message };
+
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-map`);
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
+  return { success: true };
+}

@@ -10,6 +10,7 @@ interface ResortSettingsFormProps {
   defaultSlug: string;
   defaultIsPublished: boolean;
   defaultZoom: number;
+  totalHomes: number | null;
   centerLat: number | null;
   centerLng: number | null;
   updateResort: (formData: FormData) => void;
@@ -22,6 +23,7 @@ export function ResortSettingsForm({
   defaultSlug,
   defaultIsPublished,
   defaultZoom,
+  totalHomes,
   centerLat,
   centerLng,
   updateResort,
@@ -56,6 +58,19 @@ export function ResortSettingsForm({
             min={1}
             max={22}
             defaultValue={defaultZoom}
+            className="w-24 rounded-md border border-neutral-300 px-3 py-2"
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          Total homes (optional, for capture progress)
+          <input
+            type="number"
+            name="totalHomes"
+            min={1}
+            max={5000}
+            defaultValue={totalHomes ?? ""}
+            placeholder="e.g. 352"
             className="w-24 rounded-md border border-neutral-300 px-3 py-2"
           />
         </label>

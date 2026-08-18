@@ -7,8 +7,15 @@ deployment (Next.js on Vercel, Postgres/PostGIS on Supabase).
 ## What's implemented (Phase 1)
 
 - Staff admin area (magic-link sign-in, allow-listed by email) to create
-  resorts, capture site GPS coordinates (walk-and-drop tool or CSV import),
-  and download each resort's QR code (PNG/SVG).
+  resorts and download each resort's QR code (PNG/SVG).
+- Three ways to capture site coordinates, so staff aren't stuck walking
+  every resort in person: a **satellite click-to-place tool** (zoom into
+  free aerial imagery and click each house — the main way for most
+  resorts), a **GPS walk-and-drop tool** (for on-site spot-checks), and
+  **CSV import**. The satellite tool always shows the live set of
+  already-captured sites as pins, so a partially-built resort can be
+  revisited and continued over months without losing track of progress —
+  optionally against a "total homes" target set per resort.
 - Public visitor page (`/r/{resort-slug}`) with a site-number search and a
   map showing a straight-line distance/bearing from the resort's entrance
   point to the selected site. This is intentionally approximate — see
@@ -50,7 +57,9 @@ published to OpenStreetMap) is Phase 2, not built yet.
 - `app/(admin)/admin/login` — magic-link sign-in (unauthenticated).
 - `app/(admin)/admin/(protected)/...` — resort CRUD, QR panel, site
   capture/import, all gated by the staff allow-list check in that
-  segment's `layout.tsx`.
+  segment's `layout.tsx`. `resorts/[resortId]/capture-map` is the
+  satellite click-to-place tool; `capture-sites` is the GPS tool;
+  `import-sites` is CSV import.
 - `app/(public)/r/[slug]` — visitor landing page.
 - `app/api/resorts/[resortId]/qr` — QR PNG/SVG download endpoint.
 - `lib/supabase/` — browser/server/admin Supabase clients and the
