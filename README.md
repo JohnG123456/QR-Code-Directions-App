@@ -6,8 +6,8 @@ deployment (Next.js on Vercel, Postgres/PostGIS on Supabase).
 
 ## What's implemented (Phase 1)
 
-- Staff admin area (magic-link sign-in, allow-listed by email) to create
-  resorts and download each resort's QR code (PNG/SVG).
+- Staff admin area (email + password sign-in, allow-listed by email) to
+  create resorts and download each resort's QR code (PNG/SVG).
 - Three ways to capture site coordinates, so staff aren't stuck walking
   every resort in person: a **satellite click-to-place tool** (zoom into
   free aerial imagery and click each house — the main way for most
@@ -40,21 +40,24 @@ published to OpenStreetMap) is Phase 2, not built yet.
    - `NEXT_PUBLIC_SITE_URL` — the domain QR codes will point to. Fine to
      leave as `http://localhost:3000` for local development; update it
      before printing any signage.
-4. Add your first staff user: sign up the account normally via Supabase
-   Auth (or invite via the Supabase dashboard), then insert a matching row
-   so the app treats them as staff:
+4. Add your first staff user directly in the Supabase dashboard —
+   **Authentication → Users → Add user**, set an email and password, and
+   tick "Auto Confirm User" (no email needs to be sent). Then insert a
+   matching row so the app treats them as staff:
    ```sql
    insert into staff_profiles (id, email, is_admin)
    values ('<auth-user-uuid>', 'you@example.com', true);
    ```
-   There's no public self-signup — only emails with a `staff_profiles` row
-   can use `/admin`.
+   There's no public self-signup and no password-reset email flow yet —
+   only emails with a `staff_profiles` row can use `/admin`, and if
+   someone forgets their password, reset it for them from the same Users
+   page in the dashboard.
 5. `npm install`
 6. `npm run dev` and open `http://localhost:3000/admin`.
 
 ## Project structure
 
-- `app/(admin)/admin/login` — magic-link sign-in (unauthenticated).
+- `app/(admin)/admin/login` — email + password sign-in (unauthenticated).
 - `app/(admin)/admin/(protected)/...` — resort CRUD, QR panel, site
   capture/import, all gated by the staff allow-list check in that
   segment's `layout.tsx`. `resorts/[resortId]/capture-map` is the
