@@ -71,6 +71,7 @@ export function NetworkEditor({
   initialNodes,
   initialEdges,
   sites,
+  connectors,
   planCalibration,
   addGraphNode,
   addGraphEdge,
@@ -87,6 +88,8 @@ export function NetworkEditor({
   initialNodes: GraphNode[];
   initialEdges: GraphEdge[];
   sites: SiteMarker[];
+  /** Generated site spurs, drawn for context but not editable here. */
+  connectors: [number, number][][];
   planCalibration: {
     pairs: PointPair[];
     imageWidth: number;
@@ -403,6 +406,15 @@ export function NetworkEditor({
               icon={siteDivIcon(site.status)}
               opacity={0.5}
               interactive={false}
+            />
+          ))}
+
+          {connectors.map((shape, i) => (
+            <Polyline
+              key={`connector-${i}`}
+              positions={shape}
+              interactive={false}
+              pathOptions={{ color: "#6b7280", weight: 2, opacity: 0.6, dashArray: "4 4" }}
             />
           ))}
 

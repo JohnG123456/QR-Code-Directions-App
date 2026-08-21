@@ -213,3 +213,32 @@ export async function setEntranceNode(
   revalidatePath(`/r`);
   return {};
 }
+
+export interface ConnectResult {
+  connected: number;
+  error?: string;
+}
+
+// Attaches every site to its nearest road, splitting that road so the
+// junction actually exists in the graph. Run after tracing, and again
+// after adding or moving sites.
+export async function connectSitesToNetwork(
+  resortId: string,
+  reconnectAll: boolean
+): Promise<ConnectResult> {
+  if (!z.string().uuid().safeParse(resortId).success) {
+    return { connected: 0, error: "Invalid resort" };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("connect_sites_to_network", {
+    p_resort_id: resortId,
+    p_reconnect: reconnectAll,
+  });
+
+  if (error) return { connected: 0, error: error.message };
+
+  revalidatePath(`/admin/resorts/${resortId}/network`);
+  revalidatePath(`/admin/resorts/${resortId}/sites`);
+  return { connected: typeof data === "number" ? data : 0 };
+}
