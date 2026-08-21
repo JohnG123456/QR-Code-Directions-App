@@ -6,11 +6,29 @@
 // the parser missed - this is meant to save re-typing ~200 numbers, not to
 // be perfectly accurate on its own.
 
-import * as pdfjsLib from "pdfjs-dist";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { TextItem } from "pdfjs-dist/types/src/display/api";
 
+// pdfjs-dist calls Promise.withResolvers(), which only landed in
+// Safari 17.4 (March 2024) - older iOS/Safari throws a cryptic
+// "undefined is not a function" without this polyfill.
+if (typeof Promise.withResolvers !== "function") {
+  Promise.withResolvers = function withResolvers<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
+// The plain (non-legacy) build assumes very recent browser JS features;
+// legacy targets a broader range, which matters here since this runs on
+// whatever device staff happen to be using in the field.
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.min.mjs",
+  "pdfjs-dist/legacy/build/pdf.worker.min.mjs",
   import.meta.url
 ).toString();
 
