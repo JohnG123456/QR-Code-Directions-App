@@ -119,7 +119,20 @@ export function CsvImportTool({
 
           {result && (
             <div className="text-sm">
-              <p className="text-green-700">Imported/updated {result.inserted} sites.</p>
+              {result.inserted > 0 ? (
+                <p className="text-green-700">
+                  Imported/updated {result.inserted} sites.
+                </p>
+              ) : (
+                <p className="text-red-700">Nothing was imported.</p>
+              )}
+              {result.warnings.length > 0 && (
+                <ul className="mt-1 list-disc pl-5 text-amber-700">
+                  {result.warnings.map((warning, i) => (
+                    <li key={i}>{warning}</li>
+                  ))}
+                </ul>
+              )}
               {result.errors.length > 0 && (
                 <ul className="mt-1 list-disc pl-5 text-red-600">
                   {result.errors.map((err, i) => (

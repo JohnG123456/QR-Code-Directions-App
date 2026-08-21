@@ -34,6 +34,36 @@ export interface MergedRow extends ImportRow {
   status: SiteStatus;
 }
 
+export interface DedupeResult {
+  rows: ImportRow[];
+  /** Site numbers that appeared more than once, for reporting back. */
+  duplicates: string[];
+}
+
+// Postgres refuses to update the same row twice within one statement
+// ("ON CONFLICT DO UPDATE command cannot affect row a second time"), so a
+// single duplicated site number fails the entire import - 0 sites written.
+//
+// Duplicates are easy to end up with here: the same number can be printed
+// twice on a master plan sheet, or picked up once by the extractor and
+// again when staff add a number by hand. Rather than failing the batch,
+// keep the last occurrence (the most recently placed position wins) and
+// report which numbers were duplicated so they can be checked.
+export function dedupeImportRows(rows: ImportRow[]): DedupeResult {
+  const byNumber = new Map<string, ImportRow>();
+  const seenTwice = new Set<string>();
+
+  for (const row of rows) {
+    if (byNumber.has(row.site_number)) seenTwice.add(row.site_number);
+    byNumber.set(row.site_number, row);
+  }
+
+  return {
+    rows: [...byNumber.values()],
+    duplicates: [...seenTwice].sort(),
+  };
+}
+
 export function mergeImportRows(
   resortId: string,
   rows: ImportRow[],

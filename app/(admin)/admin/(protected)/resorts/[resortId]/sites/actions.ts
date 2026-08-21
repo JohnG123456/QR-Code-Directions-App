@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { mergeImportRows } from "@/lib/sites/merge-import-rows";
+import { dedupeImportRows, mergeImportRows } from "@/lib/sites/merge-import-rows";
 
 export interface ActionState {
   error?: string;
@@ -69,7 +69,10 @@ const importRowSchema = z.object({
 
 export interface ImportResult {
   inserted: number;
+  /** Rows that couldn't be written, or a failure that stopped the import. */
   errors: string[];
+  /** Things worth telling staff about an import that did succeed. */
+  warnings: string[];
 }
 
 // Bulk upsert from the CSV import tool. Rows are already parsed/validated
@@ -81,6 +84,7 @@ export async function bulkUpsertSites(
 ): Promise<ImportResult> {
   const supabase = await createClient();
   const errors: string[] = [];
+  const warnings: string[] = [];
   const validRows: { site_number: string; label: string | null; location: string }[] = [];
 
   rows.forEach((row, index) => {
@@ -97,7 +101,20 @@ export async function bulkUpsertSites(
   });
 
   if (validRows.length === 0) {
-    return { inserted: 0, errors };
+    return { inserted: 0, errors, warnings };
+  }
+
+  // Collapse repeated site numbers before they reach Postgres - one
+  // duplicate in the batch would otherwise fail the whole upsert and write
+  // nothing at all. See lib/sites/merge-import-rows.ts.
+  const { rows: uniqueRows, duplicates } = dedupeImportRows(validRows);
+  if (duplicates.length > 0) {
+    warnings.push(
+      `Site ${duplicates.length === 1 ? "number" : "numbers"} ${duplicates.join(", ")} ` +
+        `appeared more than once - the last position was kept. Check ${
+          duplicates.length === 1 ? "it" : "them"
+        } on the map.`
+    );
   }
 
   // Read what's already stored so re-importing doesn't undo curation -
@@ -111,23 +128,23 @@ export async function bulkUpsertSites(
 
   if (existingError) {
     errors.push(existingError.message);
-    return { inserted: 0, errors };
+    return { inserted: 0, errors, warnings };
   }
 
   const { error, count } = await supabase
     .from("sites")
-    .upsert(mergeImportRows(resortId, validRows, existing ?? []), {
+    .upsert(mergeImportRows(resortId, uniqueRows, existing ?? []), {
       onConflict: "resort_id,site_number",
       count: "exact",
     });
 
   if (error) {
     errors.push(error.message);
-    return { inserted: 0, errors };
+    return { inserted: 0, errors, warnings };
   }
 
   revalidatePath(`/admin/resorts/${resortId}/sites`);
-  return { inserted: count ?? validRows.length, errors };
+  return { inserted: count ?? uniqueRows.length, errors, warnings };
 }
 
 const setSiteStatusSchema = z.object({
