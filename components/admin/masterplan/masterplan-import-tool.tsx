@@ -198,12 +198,20 @@ export function MasterplanImportTool({
 
       {step === "review" && plan && (
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-neutral-600">
-            Found <strong>{labels.length}</strong> candidate site numbers.
-            Click a marker to remove a false positive (dates, scale, project
-            numbers etc. sometimes get picked up); click a blank spot to add
-            one that was missed.
-          </p>
+          {plan.extractionError ? (
+            <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
+              Automatic site-number detection didn&apos;t work on this
+              device, but the plan rendered fine — click each site&apos;s
+              position below and type in its number to add it manually.
+            </p>
+          ) : (
+            <p className="text-sm text-neutral-600">
+              Found <strong>{labels.length}</strong> candidate site numbers.
+              Click a marker to remove a false positive (dates, scale, project
+              numbers etc. sometimes get picked up); click a blank spot to add
+              one that was missed.
+            </p>
+          )}
           <div
             className="relative inline-block w-full cursor-crosshair overflow-hidden rounded-md border border-neutral-300"
             onClick={handleReviewImageClick}

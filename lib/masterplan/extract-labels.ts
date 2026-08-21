@@ -44,6 +44,10 @@ export interface ExtractedPlan {
   imageWidth: number;
   imageHeight: number;
   labels: ExtractedLabel[];
+  // Set when the plan image rendered fine but automatic label detection
+  // failed (seen on some older mobile browsers). Staff can still add every
+  // site manually by clicking on the image in the review step.
+  extractionError?: string;
 }
 
 const SITE_NUMBER_PATTERN = /^\d{1,4}[A-Za-z]?$/;
@@ -78,30 +82,34 @@ export async function extractMasterplan(file: File): Promise<ExtractedPlan> {
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("[canvas setup] Could not create a canvas context.");
 
-  await stage("rendering page", () => page.render({ canvas, canvasContext: ctx, viewport }).promise);
+  const imageDataUrl = await stage("encoding image", () => canvas.toDataURL("image/png"));
+  const base = { imageDataUrl, imageWidth: viewport.width, imageHeight: viewport.height };
 
-  const textContent = await stage("reading text layer", () => page.getTextContent());
+  // Automatic text detection is a nice-to-have on top of the rendered
+  // image, not a hard requirement - if it fails (seen on some older
+  // mobile browsers, deep inside the PDF library's own text-layer code),
+  // fall back to an empty label list rather than blocking the whole tool.
+  // Staff can still place every site manually by clicking on the image.
+  try {
+    const textContent = await page.getTextContent({ disableNormalization: true });
 
-  const rawItems = await stage("mapping text positions", () =>
-    textContent.items
+    const rawItems = textContent.items
       .filter((item): item is TextItem => "str" in item)
       .map((item) => {
         const [px, py] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
         return { str: item.str, x: px, y: py, width: item.width * RENDER_SCALE };
       })
-      .filter((item) => item.str.trim().length > 0)
-  );
+      .filter((item) => item.str.trim().length > 0);
 
-  const labels = await stage("grouping labels", () =>
-    groupIntoLabels(rawItems).filter((label) => SITE_NUMBER_PATTERN.test(label.text))
-  );
+    const labels = groupIntoLabels(rawItems).filter((label) =>
+      SITE_NUMBER_PATTERN.test(label.text)
+    );
 
-  return await stage("encoding image", () => ({
-    imageDataUrl: canvas.toDataURL("image/png"),
-    imageWidth: viewport.width,
-    imageHeight: viewport.height,
-    labels: labels.map((label, i) => ({ id: `label-${i}`, ...label })),
-  }));
+    return { ...base, labels: labels.map((label, i) => ({ id: `label-${i}`, ...label })) };
+  } catch (err) {
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    return { ...base, labels: [], extractionError: detail };
+  }
 }
 
 interface RawTextItem {
