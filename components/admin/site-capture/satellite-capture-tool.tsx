@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MapContainer, Marker, Popup, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
 import type { Map as LeafletMap, Marker as LeafletMarker } from "leaflet";
 import { fixDefaultLeafletIcon } from "@/lib/map/fix-default-icon";
 import { siteDivIcon, labelledSiteDivIcon } from "@/lib/map/site-icon";
@@ -67,6 +67,34 @@ function ClickToAdd({ onPick }: { onPick: (lat: number, lng: number) => void }) 
     container.addEventListener("pointerdown", onPointerDown, true);
     return () => container.removeEventListener("pointerdown", onPointerDown, true);
   }, [map]);
+
+  return null;
+}
+
+// Frames the resort once, when the map first has sites to show.
+//
+// This used to live in the map's ref callback, which is the bug behind
+// the view snapping back: a ref callback declared inline is a new
+// function every render, so React detached and reattached it each time
+// and re-ran the fit. Saving a pin, deleting one, ticking Numbers, even
+// typing a character in the "jump to site" box threw the view back out
+// to the whole resort - far too small to work at with a few hundred
+// homes on it.
+//
+// It lives inside the map rather than beside it because useMap() is
+// guaranteed to have the map instance; the parent's ref isn't set yet
+// when the parent's own effects first run, so the fit would be skipped at
+// mount and then fire on the first edit instead - which looked identical
+// to the original bug.
+function FitToAllSitesOnce({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  const done = useRef(false);
+
+  useEffect(() => {
+    if (done.current || points.length < 2) return;
+    done.current = true;
+    map.fitBounds(points, { padding: [50, 50] });
+  }, [map, points]);
 
   return null;
 }
@@ -168,16 +196,6 @@ export function SatelliteCaptureTool({
       : centerLat !== null && centerLng !== null
         ? [centerLat, centerLng]
         : [-31.9505, 115.8605];
-
-  function handleMapReady(map: LeafletMap | null) {
-    mapRef.current = map;
-    if (map && sites.length > 1) {
-      map.fitBounds(
-        sites.map((s) => [s.lat, s.lng] as [number, number]),
-        { padding: [50, 50] }
-      );
-    }
-  }
 
   async function handleSaveNewSite() {
     if (!pending || !newSiteNumber.trim()) return;
@@ -458,9 +476,13 @@ export function SatelliteCaptureTool({
           center={initialCenter}
           zoom={sites.length > 0 ? defaultZoom : defaultZoom - 2}
           className="h-full w-full"
-          ref={handleMapReady}
+          ref={mapRef}
         >
           <BasemapTileLayer />
+
+          <FitToAllSitesOnce
+            points={sites.map((s) => [s.lat, s.lng] as [number, number])}
+          />
 
           {showPlan && planImage && georeference && planCalibration && (
             <PlanImageOverlay
