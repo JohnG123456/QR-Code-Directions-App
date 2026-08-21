@@ -1,0 +1,146 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { fetchRemoteDraftSummary } from "@/lib/masterplan/remote-draft";
+import { NetworkEditorClient } from "./network-editor-client";
+import {
+  addGraphNode,
+  addGraphEdge,
+  moveGraphNode,
+  deleteGraphNode,
+  deleteGraphEdge,
+  setEntranceNode,
+} from "./actions";
+
+interface EdgeRow {
+  id: string;
+  from_node_id: string;
+  to_node_id: string;
+  path_type: string;
+  length_m: number | null;
+  geojson: { type: string; coordinates: [number, number][] } | null;
+}
+
+export default async function NetworkPage({
+  params,
+}: {
+  params: Promise<{ resortId: string }>;
+}) {
+  const { resortId } = await params;
+  const supabase = await createClient();
+
+  const { data: resort } = await supabase
+    .from("resorts")
+    .select("id, name, default_zoom, center_lat, center_lng, entrance_node_id")
+    .eq("id", resortId)
+    .single();
+
+  if (!resort) notFound();
+
+  const [{ data: nodes }, { data: edges }, { data: sites }, draft] = await Promise.all([
+    supabase
+      .from("graph_nodes")
+      .select("id, lat, lng, node_type")
+      .eq("resort_id", resortId),
+    supabase
+      .from("graph_edges_view")
+      .select("id, from_node_id, to_node_id, path_type, length_m, geojson")
+      .eq("resort_id", resortId),
+    supabase
+      .from("sites")
+      .select("id, site_number, lat, lng, status")
+      .eq("resort_id", resortId)
+      .order("site_number"),
+    // The calibration from the master plan import is what lets the plan
+    // be shown in its real-world position. Only the reference points are
+    // needed here - the image itself is fetched on demand, since it's a
+    // couple of MB and most visits don't need it.
+    fetchRemoteDraftSummary(supabase, resortId),
+  ]);
+
+  if (resort.center_lat === null || resort.center_lng === null) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Link
+          href={`/admin/resorts/${resortId}`}
+          className="text-sm text-neutral-500 hover:underline"
+        >
+          ← {resort.name}
+        </Link>
+        <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          This resort needs a reference point before the road network can be
+          drawn. Set one under the resort&apos;s Settings.
+        </p>
+      </div>
+    );
+  }
+
+  const edgeRows = (edges ?? []) as EdgeRow[];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <Link
+          href={`/admin/resorts/${resortId}`}
+          className="text-sm text-neutral-500 hover:underline"
+        >
+          ← {resort.name}
+        </Link>
+        <h1 className="mt-1 text-xl font-semibold">Road network</h1>
+        <p className="mt-1 text-sm text-neutral-500">
+          Trace the resort&apos;s internal streets so visitors get directions
+          along the roads instead of a straight line.
+        </p>
+      </div>
+
+      <NetworkEditorClient
+        resortId={resort.id}
+        centerLat={resort.center_lat}
+        centerLng={resort.center_lng}
+        defaultZoom={resort.default_zoom}
+        entranceNodeId={resort.entrance_node_id}
+        initialNodes={(nodes ?? []).filter(
+          (n): n is typeof n & { lat: number; lng: number } =>
+            n.lat !== null && n.lng !== null
+        )}
+        initialEdges={edgeRows.flatMap((edge) =>
+          edge.geojson
+            ? [
+                {
+                  id: edge.id,
+                  fromNodeId: edge.from_node_id,
+                  toNodeId: edge.to_node_id,
+                  pathType: edge.path_type,
+                  lengthM: edge.length_m,
+                  // GeoJSON is [lng, lat]; Leaflet wants [lat, lng].
+                  shape: edge.geojson.coordinates.map(
+                    ([lng, lat]) => [lat, lng] as [number, number]
+                  ),
+                },
+              ]
+            : []
+        )}
+        sites={(sites ?? []).filter(
+          (s): s is typeof s & { lat: number; lng: number } =>
+            s.lat !== null && s.lng !== null
+        )}
+        planCalibration={
+          draft && draft.pairs.length >= 2
+            ? {
+                pairs: draft.pairs,
+                imageWidth: draft.imageWidth,
+                imageHeight: draft.imageHeight,
+                fileName: draft.fileName,
+              }
+            : null
+        }
+        addGraphNode={addGraphNode}
+        addGraphEdge={addGraphEdge}
+        moveGraphNode={moveGraphNode}
+        deleteGraphNode={deleteGraphNode}
+        deleteGraphEdge={deleteGraphEdge}
+        setEntranceNode={setEntranceNode}
+      />
+    </div>
+  );
+}

@@ -1,4 +1,4 @@
-const EARTH_RADIUS_M = 6371000;
+export const EARTH_RADIUS_M = 6371000;
 const AVERAGE_WALK_SPEED_M_S = 1.3;
 
 export interface LatLng {
