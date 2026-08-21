@@ -7,12 +7,19 @@ import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { LatLng } from "@/lib/geo/distance";
 import "leaflet/dist/leaflet.css";
 
-function FitBoundsOnMount({ points }: { points: [number, number][] }) {
+// Frames the walk when it changes - and only then. The dependency is a
+// string, not the array: a fresh array on every render would re-frame the
+// map continuously and undo the visitor's own panning and zooming.
+function FitBoundsOnRouteChange({ points }: { points: [number, number][] }) {
   const map = useMap();
+  const key = points.map(([lat, lng]) => `${lat},${lng}`).join(";");
   useEffect(() => {
     if (points.length < 2) return;
     map.fitBounds(points, { padding: [40, 40] });
-  }, [map, points]);
+    // points is derived from key; depending on it directly would defeat
+    // the point of keying on the string.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, key]);
   return null;
 }
 
@@ -55,7 +62,7 @@ export function LeafletRouteView({
           pathOptions={{ color: "#2563eb", dashArray: "8 8", weight: 4 }}
         />
       )}
-      <FitBoundsOnMount points={bounds} />
+      <FitBoundsOnRouteChange points={bounds} />
     </MapContainer>
   );
 }
