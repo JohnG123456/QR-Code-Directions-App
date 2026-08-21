@@ -49,39 +49,59 @@ export interface ExtractedPlan {
 const SITE_NUMBER_PATTERN = /^\d{1,4}[A-Za-z]?$/;
 const RENDER_SCALE = 2; // higher scale = sharper text/easier to click precisely
 
+// Wraps a stage of the pipeline so a failure says *where* it happened
+// instead of just what the browser's generic error text was - needed to
+// diagnose failures on devices we can't attach devtools to.
+async function stage<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    throw new Error(`[${name}] ${detail}`);
+  }
+}
+
 export async function extractMasterplan(file: File): Promise<ExtractedPlan> {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: RENDER_SCALE });
+  const arrayBuffer = await stage("reading file", () => file.arrayBuffer());
+
+  const pdf = await stage("loading PDF", () =>
+    pdfjsLib.getDocument({ data: arrayBuffer, isOffscreenCanvasSupported: false }).promise
+  );
+  const page = await stage("opening page 1", () => pdf.getPage(1));
+  const viewport = await stage("computing viewport", () =>
+    page.getViewport({ scale: RENDER_SCALE })
+  );
 
   const canvas = document.createElement("canvas");
   canvas.width = viewport.width;
   canvas.height = viewport.height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Could not create a canvas context to render the PDF.");
+  if (!ctx) throw new Error("[canvas setup] Could not create a canvas context.");
 
-  await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+  await stage("rendering page", () => page.render({ canvas, canvasContext: ctx, viewport }).promise);
 
-  const textContent = await page.getTextContent();
-  const rawItems = textContent.items
-    .filter((item): item is TextItem => "str" in item)
-    .map((item) => {
-      const [px, py] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
-      return { str: item.str, x: px, y: py, width: item.width * RENDER_SCALE };
-    })
-    .filter((item) => item.str.trim().length > 0);
+  const textContent = await stage("reading text layer", () => page.getTextContent());
 
-  const labels = groupIntoLabels(rawItems).filter((label) =>
-    SITE_NUMBER_PATTERN.test(label.text)
+  const rawItems = await stage("mapping text positions", () =>
+    textContent.items
+      .filter((item): item is TextItem => "str" in item)
+      .map((item) => {
+        const [px, py] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
+        return { str: item.str, x: px, y: py, width: item.width * RENDER_SCALE };
+      })
+      .filter((item) => item.str.trim().length > 0)
   );
 
-  return {
+  const labels = await stage("grouping labels", () =>
+    groupIntoLabels(rawItems).filter((label) => SITE_NUMBER_PATTERN.test(label.text))
+  );
+
+  return await stage("encoding image", () => ({
     imageDataUrl: canvas.toDataURL("image/png"),
     imageWidth: viewport.width,
     imageHeight: viewport.height,
     labels: labels.map((label, i) => ({ id: `label-${i}`, ...label })),
-  };
+  }));
 }
 
 interface RawTextItem {
