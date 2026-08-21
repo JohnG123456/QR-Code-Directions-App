@@ -43,6 +43,12 @@ export default async function SitesPage({
 
       <div className="flex gap-3">
         <Link
+          href={`/admin/resorts/${resortId}/import-masterplan`}
+          className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
+        >
+          Import from master plan
+        </Link>
+        <Link
           href={`/admin/resorts/${resortId}/capture-map`}
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >

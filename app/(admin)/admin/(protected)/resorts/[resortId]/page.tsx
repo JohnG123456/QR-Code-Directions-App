@@ -47,6 +47,12 @@ export default async function ResortDetailPage({
           {resort.total_homes ? ` / ${resort.total_homes}` : ""})
         </Link>
         <Link
+          href={`/admin/resorts/${resort.id}/import-masterplan`}
+          className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
+        >
+          Import from master plan
+        </Link>
+        <Link
           href={`/admin/resorts/${resort.id}/capture-map`}
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
