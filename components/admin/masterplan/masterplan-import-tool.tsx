@@ -14,11 +14,25 @@ import {
   describeSavedAt,
   type MasterplanDraft,
 } from "@/lib/masterplan/draft-store";
+import {
+  saveMasterplanDraft,
+  loadMasterplanDraft,
+  loadMasterplanDraftSummary,
+  clearMasterplanDraft,
+} from "@/app/(admin)/admin/(protected)/resorts/[resortId]/import-masterplan/actions";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { ImportResult } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
 import "leaflet/dist/leaflet.css";
 
 type Step = "upload" | "review" | "calibrate" | "preview" | "done";
+
+// What the "pick up where I left off" banner needs. The local (IndexedDB)
+// draft always carries its image; the remote one describes itself without
+// it and fetches it only if the draft is actually resumed - it's a couple
+// of MB, and most visits to this page are to start something new.
+type DraftPreview = Omit<MasterplanDraft, "imageDataUrl"> & {
+  imageDataUrl?: string;
+};
 
 interface ComputedSite {
   id: string;
@@ -71,24 +85,41 @@ export function MasterplanImportTool({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileNameRef = useRef<string | null>(null);
   const [pickedFileName, setPickedFileName] = useState<string | null>(null);
-  const [foundDraft, setFoundDraft] = useState<MasterplanDraft | null>(null);
+  const [foundDraft, setFoundDraft] = useState<DraftPreview | null>(null);
+  const [isResuming, setIsResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [lastImportedAt, setLastImportedAt] = useState<number | null>(null);
-  const [saveFailed, setSaveFailed] = useState(false);
+  // Tracked separately: a draft saved to the account but not to this
+  // browser is still safe, and saying "nothing is being saved" then would
+  // be wrong. Only losing both is worth a red warning.
+  const [localSaveFailed, setLocalSaveFailed] = useState(false);
+  const [remoteSaveFailed, setRemoteSaveFailed] = useState(false);
 
-  // Offer to pick up an unfinished review from a previous sitting.
+  // Offer to pick up an unfinished review from a previous sitting - from
+  // this browser or from the account, whichever was saved more recently.
+  // The remote copy is what makes "carry on from a different device" and
+  // "carry on after clearing the browser" work at all.
   useEffect(() => {
     let cancelled = false;
-    loadDraft(resortId).then((draft) => {
-      if (!cancelled && draft) setFoundDraft(draft);
+    Promise.all([
+      loadDraft(resortId),
+      loadMasterplanDraftSummary(resortId).catch(() => null),
+    ]).then(([local, remote]) => {
+      if (cancelled) return;
+      const newest = [local, remote]
+        .filter((d): d is DraftPreview => d !== null)
+        .sort((a, b) => b.savedAt - a.savedAt)[0];
+      if (newest) setFoundDraft(newest);
     });
     return () => {
       cancelled = true;
     };
   }, [resortId]);
 
-  // Autosave whatever's on screen, debounced so dragging a marker around
-  // doesn't hammer IndexedDB.
+  // Autosave whatever's on screen to both copies, debounced so dragging a
+  // marker around doesn't hammer IndexedDB or the network. The remote
+  // save carries no image - the extract route already stored that.
   useEffect(() => {
     if (!plan || step === "done") return;
     const timer = setTimeout(() => {
@@ -105,10 +136,24 @@ export function MasterplanImportTool({
         pairs,
         lastImportedAt: lastImportedAt ?? undefined,
       }).then((ok) => {
-        setSaveFailed(!ok);
+        setLocalSaveFailed(!ok);
         if (ok) setDraftSavedAt(savedAt);
       });
-    }, 800);
+
+      saveMasterplanDraft({
+        resortId,
+        fileName: fileNameRef.current,
+        step,
+        labels,
+        pairs,
+        lastImportedAt,
+      })
+        .then((ok) => {
+          setRemoteSaveFailed(!ok);
+          if (ok) setDraftSavedAt(savedAt);
+        })
+        .catch(() => setRemoteSaveFailed(true));
+    }, 1200);
     return () => clearTimeout(timer);
   }, [resortId, plan, labels, pairs, step, lastImportedAt]);
 
@@ -124,11 +169,33 @@ export function MasterplanImportTool({
   const reference = { lat: centerLat, lng: centerLng };
   const selectedLabel = labels.find((l) => l.id === selectedLabelId) ?? null;
 
-  function resumeDraft() {
+  async function resumeDraft() {
     if (!foundDraft) return;
+    setResumeError(null);
+
+    // The remote draft describes itself without its image; fetch it now.
+    let imageDataUrl = foundDraft.imageDataUrl;
+    if (!imageDataUrl) {
+      setIsResuming(true);
+      try {
+        const full = await loadMasterplanDraft(resortId);
+        imageDataUrl = full?.imageDataUrl;
+      } catch {
+        imageDataUrl = undefined;
+      } finally {
+        setIsResuming(false);
+      }
+    }
+    if (!imageDataUrl) {
+      setResumeError(
+        "Couldn't load the saved plan image. Check your connection and try again."
+      );
+      return;
+    }
+
     fileNameRef.current = foundDraft.fileName;
     setPlan({
-      imageDataUrl: foundDraft.imageDataUrl,
+      imageDataUrl,
       imageWidth: foundDraft.imageWidth,
       imageHeight: foundDraft.imageHeight,
       labels: foundDraft.labels,
@@ -142,12 +209,29 @@ export function MasterplanImportTool({
   }
 
   async function discardDraft() {
-    await clearDraft(resortId);
+    await Promise.all([
+      clearDraft(resortId),
+      clearMasterplanDraft(resortId).catch(() => undefined),
+    ]);
     setFoundDraft(null);
     setDraftSavedAt(null);
   }
 
   async function handleFileSelected(file: File) {
+    // Uploading replaces the saved draft outright - the site-number
+    // positions belong to the sheet they were placed on. Hours of review
+    // shouldn't go on a mis-tap, so confirm first when there's something
+    // to lose.
+    if (foundDraft || plan) {
+      const confirmed = window.confirm(
+        "This replaces the saved review for this resort with a fresh scan of the new PDF. Your reviewed site numbers and calibration points will be lost. Continue?"
+      );
+      if (!confirmed) {
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+    }
+
     fileNameRef.current = file.name;
     setPickedFileName(file.name);
     setFoundDraft(null);
@@ -166,6 +250,9 @@ export function MasterplanImportTool({
       }
       setPlan(result as ExtractedPlan);
       setLabels((result as ExtractedPlan).labels);
+      setPairs([]);
+      setLastImportedAt(null);
+      setRemoteSaveFailed(result.draftSaved === false);
       setStep("review");
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Couldn't read that PDF.");
@@ -269,20 +356,31 @@ export function MasterplanImportTool({
     if (result.inserted > 0 && plan) {
       const importedAt = Date.now();
       setLastImportedAt(importedAt);
-      const ok = await saveDraft({
-        resortId,
-        fileName: fileNameRef.current,
-        savedAt: importedAt,
-        lastImportedAt: importedAt,
-        // Land back on the review step, where any further numbers get added.
-        step: "review",
-        imageDataUrl: plan.imageDataUrl,
-        imageWidth: plan.imageWidth,
-        imageHeight: plan.imageHeight,
-        labels,
-        pairs,
-      });
-      setSaveFailed(!ok);
+      const [localOk, remoteOk] = await Promise.all([
+        saveDraft({
+          resortId,
+          fileName: fileNameRef.current,
+          savedAt: importedAt,
+          lastImportedAt: importedAt,
+          // Land back on the review step, where further numbers get added.
+          step: "review",
+          imageDataUrl: plan.imageDataUrl,
+          imageWidth: plan.imageWidth,
+          imageHeight: plan.imageHeight,
+          labels,
+          pairs,
+        }),
+        saveMasterplanDraft({
+          resortId,
+          fileName: fileNameRef.current,
+          step: "review",
+          labels,
+          pairs,
+          lastImportedAt: importedAt,
+        }).catch(() => false),
+      ]);
+      setLocalSaveFailed(!localOk);
+      setRemoteSaveFailed(!remoteOk);
     }
   }
 
@@ -292,19 +390,27 @@ export function MasterplanImportTool({
     <div className="flex flex-col gap-6">
       <StepIndicator step={step} onGoToStep={plan ? setStep : undefined} />
 
-      {plan && saveFailed && (
+      {plan && localSaveFailed && remoteSaveFailed && (
         <p className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-800">
-          <strong>Progress is not being saved on this device.</strong> Browser
-          storage looks unavailable (private browsing, or storage is full or
-          blocked). Finish and import in this sitting, or your review will be
-          lost when you close the page.
+          <strong>Progress is not being saved.</strong> Neither this browser
+          nor your account is accepting the draft — you may be offline, or in
+          private browsing with storage blocked. Finish and import in this
+          sitting, or your review will be lost when you close the page.
         </p>
       )}
 
-      {plan && !saveFailed && draftSavedAt && step !== "done" && (
+      {plan && remoteSaveFailed && !localSaveFailed && (
+        <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <strong>Saved on this device only.</strong> Your account copy
+          isn&apos;t updating (likely no connection), so this draft won&apos;t
+          be there on another device until the connection comes back.
+        </p>
+      )}
+
+      {plan && !remoteSaveFailed && draftSavedAt && step !== "done" && (
         <p className="text-xs text-neutral-500">
-          Progress saved on this device {describeSavedAt(draftSavedAt)} — you
-          can close this and pick it up later.
+          Progress saved to your account {describeSavedAt(draftSavedAt)} — you
+          can close this and pick it up later, on this or another device.
         </p>
       )}
 
@@ -334,9 +440,10 @@ export function MasterplanImportTool({
             <button
               type="button"
               onClick={resumeDraft}
-              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+              disabled={isResuming}
+              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              Pick up where I left off
+              {isResuming ? "Loading..." : "Pick up where I left off"}
             </button>
             <button
               type="button"
@@ -346,6 +453,7 @@ export function MasterplanImportTool({
               Discard and start fresh
             </button>
           </div>
+          {resumeError && <p className="text-sm text-red-700">{resumeError}</p>}
         </div>
       )}
 

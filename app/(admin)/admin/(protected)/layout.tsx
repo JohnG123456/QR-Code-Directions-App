@@ -54,7 +54,12 @@ export default async function ProtectedAdminLayout({
           Resort Directions Admin
         </Link>
         <div className="flex items-center gap-4 text-sm text-neutral-500">
-          <span>{staffProfile.display_name ?? staffProfile.email}</span>
+          <Link href="/admin/backup" className="hover:text-neutral-900">
+            Backup
+          </Link>
+          <span className="hidden sm:inline">
+            {staffProfile.display_name ?? staffProfile.email}
+          </span>
           <form action="/auth/signout" method="post">
             <button type="submit" className="hover:text-neutral-900">
               Sign out
