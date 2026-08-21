@@ -53,6 +53,12 @@ export default async function ResortDetailPage({
           Import from master plan
         </Link>
         <Link
+          href={`/admin/resorts/${resort.id}/network`}
+          className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
+        >
+          Road network
+        </Link>
+        <Link
           href={`/admin/resorts/${resort.id}/capture-map`}
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
