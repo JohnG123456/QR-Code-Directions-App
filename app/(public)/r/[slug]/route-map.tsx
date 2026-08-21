@@ -12,6 +12,11 @@ import {
 } from "@/lib/geo/distance";
 import type { PublicResort, PublicSite } from "@/lib/types";
 
+interface RouteResult {
+  distanceM: number;
+  points: [number, number][];
+}
+
 // react-leaflet touches `window`/`document` at import time, so the map
 // itself must be excluded from the server render.
 const LeafletRouteView = dynamic(
@@ -28,6 +33,8 @@ export function RouteMap({
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [route, setRoute] = useState<RouteResult | null>(null);
+  const [routeState, setRouteState] = useState<"idle" | "loading" | "done">("idle");
 
   const matches = useMemo(() => {
     if (!query.trim()) return [];
@@ -42,6 +49,28 @@ export function RouteMap({
   }, [query, sites]);
 
   const selectedSite = sites.find((s) => s.id === selectedId) ?? null;
+
+  // Ask for a route along the actual roads. Until it comes back - and if
+  // it never does, because this resort's network hasn't been traced or
+  // doesn't reach this site - the straight line still shows, which is
+  // rough but genuinely usable at resort scale.
+  async function loadRoute(siteId: string) {
+    if (!resort.is_routable) {
+      setRouteState("done");
+      return;
+    }
+    setRoute(null);
+    setRouteState("loading");
+    try {
+      const response = await fetch(`/api/route?site=${encodeURIComponent(siteId)}`);
+      const data = (await response.json()) as { route?: RouteResult | null };
+      setRoute(response.ok ? data.route ?? null : null);
+    } catch {
+      setRoute(null);
+    } finally {
+      setRouteState("done");
+    }
+  }
 
   const hasEntrance = resort.entrance_lat !== null && resort.entrance_lng !== null;
   const summary =
@@ -75,6 +104,8 @@ export function RouteMap({
           onChange={(e) => {
             setQuery(e.target.value);
             setSelectedId(null);
+            setRoute(null);
+            setRouteState("idle");
           }}
           autoFocus
           className="w-full rounded-md border border-neutral-300 px-4 py-3 text-base"
@@ -88,6 +119,7 @@ export function RouteMap({
                   onClick={() => {
                     setSelectedId(site.id);
                     setQuery(site.site_number);
+                    void loadRoute(site.id);
                   }}
                   className="flex w-full justify-between px-4 py-3 text-left hover:bg-neutral-50"
                 >
@@ -105,12 +137,23 @@ export function RouteMap({
       {selectedSite && hasEntrance && (
         <>
           <div className="px-4 pb-3">
-            {summary && (
+            {route ? (
               <p className="text-sm text-neutral-700">
-                Site {selectedSite.site_number} is approximately{" "}
-                <strong>{summary.distance}</strong> {summary.compass} of the
-                entrance (~{summary.walkTime} walk, straight-line).
+                Site {selectedSite.site_number} is a{" "}
+                <strong>{formatDistance(route.distanceM)}</strong> walk from the
+                entrance, about{" "}
+                {formatWalkTime(estimatedWalkSeconds(route.distanceM))}. Follow
+                the blue line.
               </p>
+            ) : (
+              summary && (
+                <p className="text-sm text-neutral-700">
+                  Site {selectedSite.site_number} is approximately{" "}
+                  <strong>{summary.distance}</strong> {summary.compass} of the
+                  entrance (~{summary.walkTime} walk, straight-line).
+                  {routeState === "loading" && " Finding the walking route…"}
+                </p>
+              )
             )}
           </div>
           <div className="flex-1">
@@ -118,6 +161,8 @@ export function RouteMap({
               entrance={{ lat: resort.entrance_lat!, lng: resort.entrance_lng! }}
               site={{ lat: selectedSite.lat!, lng: selectedSite.lng! }}
               zoom={resort.default_zoom}
+              routePoints={route?.points ?? null}
+              siteLabel={`Site ${selectedSite.site_number}`}
             />
           </div>
         </>

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchRemoteDraftSummary } from "@/lib/masterplan/remote-draft";
 import { NetworkEditorClient } from "./network-editor-client";
+import { ConnectSitesPanel } from "@/components/admin/network/connect-sites-panel";
 import {
   addGraphNode,
   addGraphEdge,
@@ -10,6 +11,7 @@ import {
   deleteGraphNode,
   deleteGraphEdge,
   setEntranceNode,
+  connectSitesToNetwork,
 } from "./actions";
 
 interface EdgeRow {
@@ -48,7 +50,7 @@ export default async function NetworkPage({
       .eq("resort_id", resortId),
     supabase
       .from("sites")
-      .select("id, site_number, lat, lng, status")
+      .select("id, site_number, lat, lng, status, graph_node_id")
       .eq("resort_id", resortId)
       .order("site_number"),
     // The calibration from the master plan import is what lets the plan
@@ -77,6 +79,21 @@ export default async function NetworkPage({
 
   const edgeRows = (edges ?? []) as EdgeRow[];
 
+  // The connectors that "Connect sites to the roads" generates - a node
+  // at each house and a short spur to it - are kept out of the editor's
+  // hands. At a couple of hundred homes they'd bury the streets being
+  // traced, and they're derived data: the way to change one is to move
+  // the site and reconnect, not to drag its spur about.
+  const siteNodeIds = new Set(
+    (nodes ?? []).filter((n) => n.node_type === "site").map((n) => n.id)
+  );
+  const isConnector = (edge: EdgeRow) =>
+    siteNodeIds.has(edge.from_node_id) || siteNodeIds.has(edge.to_node_id);
+
+  const toShape = (edge: EdgeRow) =>
+    // GeoJSON is [lng, lat]; Leaflet wants [lat, lng].
+    (edge.geojson?.coordinates ?? []).map(([lng, lat]) => [lat, lng] as [number, number]);
+
   return (
     <div className="flex flex-col gap-4">
       <div>
@@ -101,10 +118,10 @@ export default async function NetworkPage({
         entranceNodeId={resort.entrance_node_id}
         initialNodes={(nodes ?? []).filter(
           (n): n is typeof n & { lat: number; lng: number } =>
-            n.lat !== null && n.lng !== null
+            n.lat !== null && n.lng !== null && n.node_type !== "site"
         )}
         initialEdges={edgeRows.flatMap((edge) =>
-          edge.geojson
+          edge.geojson && !isConnector(edge)
             ? [
                 {
                   id: edge.id,
@@ -112,13 +129,13 @@ export default async function NetworkPage({
                   toNodeId: edge.to_node_id,
                   pathType: edge.path_type,
                   lengthM: edge.length_m,
-                  // GeoJSON is [lng, lat]; Leaflet wants [lat, lng].
-                  shape: edge.geojson.coordinates.map(
-                    ([lng, lat]) => [lat, lng] as [number, number]
-                  ),
+                  shape: toShape(edge),
                 },
               ]
             : []
+        )}
+        connectors={edgeRows.flatMap((edge) =>
+          edge.geojson && isConnector(edge) ? [toShape(edge)] : []
         )}
         sites={(sites ?? []).filter(
           (s): s is typeof s & { lat: number; lng: number } =>
@@ -140,6 +157,14 @@ export default async function NetworkPage({
         deleteGraphNode={deleteGraphNode}
         deleteGraphEdge={deleteGraphEdge}
         setEntranceNode={setEntranceNode}
+      />
+
+      <ConnectSitesPanel
+        resortId={resort.id}
+        totalSites={(sites ?? []).length}
+        connectedSites={(sites ?? []).filter((s) => s.graph_node_id !== null).length}
+        hasRoads={edgeRows.length > 0}
+        connectSitesToNetwork={connectSitesToNetwork}
       />
     </div>
   );
