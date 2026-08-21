@@ -8,14 +8,18 @@ deployment (Next.js on Vercel, Postgres/PostGIS on Supabase).
 
 - Staff admin area (email + password sign-in, allow-listed by email) to
   create resorts and download each resort's QR code (PNG/SVG).
-- Three ways to capture site coordinates, so staff aren't stuck walking
-  every resort in person: a **satellite click-to-place tool** (zoom into
-  free aerial imagery and click each house — the main way for most
-  resorts), a **GPS walk-and-drop tool** (for on-site spot-checks), and
-  **CSV import**. The satellite tool always shows the live set of
-  already-captured sites as pins, so a partially-built resort can be
-  revisited and continued over months without losing track of progress —
-  optionally against a "total homes" target set per resort.
+- Four ways to capture site coordinates, so staff aren't stuck walking
+  every resort in person: **master plan import** (upload a scaled site
+  plan PDF, it extracts candidate site numbers, you calibrate it against
+  the satellite map with a few reference points, and it bulk-computes
+  every site's coordinates at once — the fastest way to seed a large,
+  already-built resort), a **satellite click-to-place tool** (zoom into
+  free aerial imagery and click each house one at a time), a **GPS
+  walk-and-drop tool** (for on-site spot-checks), and **CSV import**. The
+  satellite tool always shows the live set of already-captured sites as
+  pins, so a partially-built resort can be revisited and continued over
+  months without losing track of progress — optionally against a "total
+  homes" target set per resort.
 - Public visitor page (`/r/{resort-slug}`) with a site-number search and a
   map showing a straight-line distance/bearing from the resort's entrance
   point to the selected site. This is intentionally approximate — see
@@ -60,15 +64,23 @@ published to OpenStreetMap) is Phase 2, not built yet.
 - `app/(admin)/admin/login` — email + password sign-in (unauthenticated).
 - `app/(admin)/admin/(protected)/...` — resort CRUD, QR panel, site
   capture/import, all gated by the staff allow-list check in that
-  segment's `layout.tsx`. `resorts/[resortId]/capture-map` is the
-  satellite click-to-place tool; `capture-sites` is the GPS tool;
-  `import-sites` is CSV import.
+  segment's `layout.tsx`. `resorts/[resortId]/import-masterplan` is the
+  PDF master plan importer; `capture-map` is the satellite click-to-place
+  tool; `capture-sites` is the GPS tool; `import-sites` is CSV import.
 - `app/(public)/r/[slug]` — visitor landing page.
 - `app/api/resorts/[resortId]/qr` — QR PNG/SVG download endpoint.
 - `lib/supabase/` — browser/server/admin Supabase clients and the
   session-refresh helper used by `proxy.ts`.
 - `lib/geo/distance.ts` — Haversine distance/bearing/walk-time helpers used
   by the Phase 1 straight-line visitor view.
+- `lib/geo/local-projection.ts` / `lib/geo/similarity-transform.ts` — the
+  math behind master plan calibration: project lat/lng to local metres
+  around a reference point, then fit a least-squares scale/rotation/
+  translation from a handful of staff-picked reference point pairs.
+- `lib/masterplan/extract-labels.ts` — browser-only PDF parsing
+  (`pdfjs-dist`): renders page 1 to an image and pulls out candidate site
+  number text labels with their pixel position, for the master plan
+  import tool to calibrate and place.
 - `supabase/migrations/0001_init.sql` — schema, RLS, and public views.
   `graph_nodes`/`graph_edges` are created here but unused until Phase 2.
 
