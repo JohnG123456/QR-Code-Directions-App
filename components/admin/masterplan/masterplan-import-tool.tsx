@@ -6,6 +6,7 @@ import type { ExtractedPlan, ExtractedLabel } from "@/lib/masterplan/extract-lab
 import { fitSimilarityTransform, type PointPair } from "@/lib/geo/similarity-transform";
 import { toLocalMeters, fromLocalMeters } from "@/lib/geo/local-projection";
 import { siteDivIcon } from "@/lib/map/site-icon";
+import { ZoomablePlan } from "@/components/admin/masterplan/zoomable-plan";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { ImportResult } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
 import "leaflet/dist/leaflet.css";
@@ -18,17 +19,6 @@ interface ComputedSite {
   lat: number;
   lng: number;
   included: boolean;
-}
-
-function relativeClickPosition(
-  e: React.MouseEvent<HTMLElement>,
-  imageWidth: number,
-  imageHeight: number
-) {
-  const rect = e.currentTarget.getBoundingClientRect();
-  const pctX = (e.clientX - rect.left) / rect.width;
-  const pctY = (e.clientY - rect.top) / rect.height;
-  return { x: pctX * imageWidth, y: pctY * imageHeight };
 }
 
 export function MasterplanImportTool({
@@ -51,6 +41,11 @@ export function MasterplanImportTool({
   const [labels, setLabels] = useState<ExtractedLabel[]>([]);
   const [pendingNewLabel, setPendingNewLabel] = useState<{ x: number; y: number } | null>(null);
   const [newLabelText, setNewLabelText] = useState("");
+  const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
+  // Off by default: at fit-to-width zoom on a phone the numbers overlap
+  // into an unreadable band across the drawing. Zoom in first, then turn
+  // them on to check specific ones.
+  const [showNumbers, setShowNumbers] = useState(false);
 
   const [pairs, setPairs] = useState<PointPair[]>([]);
   const [pendingPlanPoint, setPendingPlanPoint] = useState<{ x: number; y: number } | null>(null);
@@ -73,6 +68,7 @@ export function MasterplanImportTool({
     );
   }
   const reference = { lat: centerLat, lng: centerLng };
+  const selectedLabel = labels.find((l) => l.id === selectedLabelId) ?? null;
 
   async function handleFileSelected(file: File) {
     setIsParsing(true);
@@ -98,10 +94,12 @@ export function MasterplanImportTool({
     }
   }
 
-  function handleReviewImageClick(e: React.MouseEvent<HTMLDivElement>) {
+  function handleReviewImageClick(point: { x: number; y: number }) {
     if (!plan) return;
-    const pos = relativeClickPosition(e, plan.imageWidth, plan.imageHeight);
-    setPendingNewLabel(pos);
+    // Tapping an existing marker selects it (handled by the marker's own
+    // click handler); tapping bare drawing starts a new label here.
+    setPendingNewLabel(point);
+    setSelectedLabelId(null);
     setNewLabelText("");
   }
 
@@ -119,9 +117,9 @@ export function MasterplanImportTool({
     setLabels((prev) => prev.filter((l) => l.id !== id));
   }
 
-  function handleCalibratePlanClick(e: React.MouseEvent<HTMLDivElement>) {
+  function handleCalibratePlanClick(point: { x: number; y: number }) {
     if (!plan) return;
-    setPendingPlanPoint(relativeClickPosition(e, plan.imageWidth, plan.imageHeight));
+    setPendingPlanPoint(point);
   }
 
   function handleCalibrateMapClick(lat: number, lng: number) {
@@ -216,62 +214,134 @@ export function MasterplanImportTool({
           ) : (
             <p className="text-sm text-neutral-600">
               Found <strong>{labels.length}</strong> candidate site numbers.
-              Click a marker to remove a false positive (dates, scale, project
-              numbers etc. sometimes get picked up); click a blank spot to add
-              one that was missed.
+              Zoom in and tap a dot to check or remove a false positive (dates,
+              scale bars and project numbers sometimes get picked up); tap a
+              blank spot to add one that was missed.
             </p>
           )}
-          <div
-            className="relative inline-block w-full cursor-crosshair overflow-hidden rounded-md border border-neutral-300"
-            onClick={handleReviewImageClick}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={plan.imageDataUrl} alt="Master plan" className="block w-full" />
-            {labels.map((label) => (
-              <button
-                key={label.id}
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeLabel(label.id);
-                }}
-                title="Click to remove"
-                className="absolute -translate-x-1/2 -translate-y-1/2 rounded bg-blue-600/90 px-1 text-[10px] font-medium leading-tight text-white hover:bg-red-600"
-                style={{
-                  left: `${(label.x / plan.imageWidth) * 100}%`,
-                  top: `${(label.y / plan.imageHeight) * 100}%`,
-                }}
-              >
-                {label.text}
-              </button>
-            ))}
-            {pendingNewLabel && (
-              <div
-                className="absolute -translate-x-1/2 -translate-y-1/2 rounded bg-white p-1 shadow-lg"
-                style={{
-                  left: `${(pendingNewLabel.x / plan.imageWidth) * 100}%`,
-                  top: `${(pendingNewLabel.y / plan.imageHeight) * 100}%`,
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  autoFocus
-                  value={newLabelText}
-                  onChange={(e) => setNewLabelText(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && confirmNewLabel()}
-                  placeholder="Site #"
-                  className="w-16 rounded border border-neutral-300 px-1 py-0.5 text-xs"
-                />
-                <button
-                  type="button"
-                  onClick={confirmNewLabel}
-                  className="ml-1 rounded bg-neutral-900 px-1.5 py-0.5 text-xs text-white"
-                >
-                  Add
-                </button>
-              </div>
-            )}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+              <input
+                type="checkbox"
+                checked={showNumbers}
+                onChange={(e) => setShowNumbers(e.target.checked)}
+              />
+              Show numbers
+            </label>
+            <span className="text-xs text-neutral-500">
+              Pinch or scroll to zoom, drag to pan. Zoom in before turning
+              numbers on.
+            </span>
           </div>
+
+          <ZoomablePlan
+            imageUrl={plan.imageDataUrl}
+            imageWidth={plan.imageWidth}
+            imageHeight={plan.imageHeight}
+            onPointClick={handleReviewImageClick}
+            renderOverlay={(toScreen) => (
+              <>
+                {labels.map((label) => {
+                  const p = toScreen(label);
+                  const isSelected = selectedLabelId === label.id;
+                  return (
+                    <button
+                      key={label.id}
+                      type="button"
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedLabelId(isSelected ? null : label.id);
+                        setPendingNewLabel(null);
+                      }}
+                      title={`Site ${label.text}`}
+                      className="absolute flex -translate-x-1/2 -translate-y-1/2 items-center gap-1"
+                      style={{ left: p.x, top: p.y }}
+                    >
+                      <span
+                        className={
+                          isSelected
+                            ? "block h-3.5 w-3.5 rounded-full border-2 border-white bg-red-600 shadow"
+                            : "block h-2 w-2 rounded-full border border-white/90 bg-blue-600/70"
+                        }
+                      />
+                      {showNumbers && (
+                        <span className="whitespace-nowrap rounded bg-white/85 px-0.5 text-[9px] font-medium leading-tight text-blue-900">
+                          {label.text}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+
+                {selectedLabel && (
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="absolute z-10 -translate-x-1/2 translate-y-2 rounded-md border border-neutral-300 bg-white p-2 shadow-lg"
+                    style={{ left: toScreen(selectedLabel).x, top: toScreen(selectedLabel).y }}
+                  >
+                    <p className="mb-1 text-xs font-medium">Site {selectedLabel.text}</p>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          removeLabel(selectedLabel.id);
+                          setSelectedLabelId(null);
+                        }}
+                        className="rounded bg-red-600 px-2 py-0.5 text-xs text-white"
+                      >
+                        Remove
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedLabelId(null)}
+                        className="rounded border border-neutral-300 px-2 py-0.5 text-xs"
+                      >
+                        Keep
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {pendingNewLabel && (
+                  <div
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="absolute z-10 -translate-x-1/2 translate-y-2 rounded-md border border-neutral-300 bg-white p-2 shadow-lg"
+                    style={{
+                      left: toScreen(pendingNewLabel).x,
+                      top: toScreen(pendingNewLabel).y,
+                    }}
+                  >
+                    <div className="flex items-center gap-1">
+                      <input
+                        autoFocus
+                        inputMode="numeric"
+                        value={newLabelText}
+                        onChange={(e) => setNewLabelText(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && confirmNewLabel()}
+                        placeholder="Site #"
+                        className="w-16 rounded border border-neutral-300 px-1 py-0.5 text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={confirmNewLabel}
+                        className="rounded bg-neutral-900 px-2 py-0.5 text-xs text-white"
+                      >
+                        Add
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingNewLabel(null)}
+                        className="rounded border border-neutral-300 px-2 py-0.5 text-xs"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          />
           <button
             type="button"
             onClick={() => setStep("calibrate")}
@@ -294,36 +364,40 @@ export function MasterplanImportTool({
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div>
               <p className="mb-1 text-xs font-medium text-neutral-500">Plan</p>
-              <div
-                className="relative inline-block w-full cursor-crosshair overflow-hidden rounded-md border border-neutral-300"
-                onClick={handleCalibratePlanClick}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={plan.imageDataUrl} alt="Master plan" className="block w-full" />
-                {pairs.map((pair, i) => (
-                  <div
-                    key={i}
-                    className="absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white"
-                    style={{
-                      left: `${(pair.plan.x / plan.imageWidth) * 100}%`,
-                      top: `${(pair.plan.y / plan.imageHeight) * 100}%`,
-                    }}
-                  >
-                    {i + 1}
-                  </div>
-                ))}
-                {pendingPlanPoint && (
-                  <div
-                    className="absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white"
-                    style={{
-                      left: `${(pendingPlanPoint.x / plan.imageWidth) * 100}%`,
-                      top: `${(pendingPlanPoint.y / plan.imageHeight) * 100}%`,
-                    }}
-                  >
-                    ?
-                  </div>
+              <ZoomablePlan
+                imageUrl={plan.imageDataUrl}
+                imageWidth={plan.imageWidth}
+                imageHeight={plan.imageHeight}
+                className="relative h-80 w-full touch-none overflow-hidden rounded-md border border-neutral-300 bg-neutral-100"
+                onPointClick={handleCalibratePlanClick}
+                renderOverlay={(toScreen) => (
+                  <>
+                    {pairs.map((pair, i) => {
+                      const p = toScreen(pair.plan);
+                      return (
+                        <div
+                          key={i}
+                          className="pointer-events-none absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white"
+                          style={{ left: p.x, top: p.y }}
+                        >
+                          {i + 1}
+                        </div>
+                      );
+                    })}
+                    {pendingPlanPoint && (
+                      <div
+                        className="pointer-events-none absolute flex h-5 w-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-amber-500 text-xs font-bold text-white"
+                        style={{
+                          left: toScreen(pendingPlanPoint).x,
+                          top: toScreen(pendingPlanPoint).y,
+                        }}
+                      >
+                        ?
+                      </div>
+                    )}
+                  </>
                 )}
-              </div>
+              />
             </div>
             <div>
               <p className="mb-1 text-xs font-medium text-neutral-500">
@@ -471,7 +545,7 @@ function StepIndicator({ step }: { step: Step }) {
   const activeIndex = steps.findIndex((s) => s.key === step);
 
   return (
-    <div className="flex gap-2 text-xs">
+    <div className="flex flex-wrap gap-2 text-xs">
       {steps.map((s, i) => (
         <span
           key={s.key}
