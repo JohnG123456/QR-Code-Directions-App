@@ -1,12 +1,19 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapContainer, Marker, useMapEvents } from "react-leaflet";
 import type { ExtractedPlan, ExtractedLabel } from "@/lib/masterplan/extract-labels-server";
 import { fitSimilarityTransform, type PointPair } from "@/lib/geo/similarity-transform";
 import { toLocalMeters, fromLocalMeters } from "@/lib/geo/local-projection";
 import { siteDivIcon } from "@/lib/map/site-icon";
 import { ZoomablePlan } from "@/components/admin/masterplan/zoomable-plan";
+import {
+  saveDraft,
+  loadDraft,
+  clearDraft,
+  describeSavedAt,
+  type MasterplanDraft,
+} from "@/lib/masterplan/draft-store";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { ImportResult } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
 import "leaflet/dist/leaflet.css";
@@ -57,6 +64,42 @@ export function MasterplanImportTool({
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileNameRef = useRef<string | null>(null);
+  const [pickedFileName, setPickedFileName] = useState<string | null>(null);
+  const [foundDraft, setFoundDraft] = useState<MasterplanDraft | null>(null);
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+
+  // Offer to pick up an unfinished review from a previous sitting.
+  useEffect(() => {
+    let cancelled = false;
+    loadDraft(resortId).then((draft) => {
+      if (!cancelled && draft) setFoundDraft(draft);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [resortId]);
+
+  // Autosave whatever's on screen, debounced so dragging a marker around
+  // doesn't hammer IndexedDB.
+  useEffect(() => {
+    if (!plan || step === "done") return;
+    const timer = setTimeout(() => {
+      const savedAt = Date.now();
+      saveDraft({
+        resortId,
+        fileName: fileNameRef.current,
+        savedAt,
+        step,
+        imageDataUrl: plan.imageDataUrl,
+        imageWidth: plan.imageWidth,
+        imageHeight: plan.imageHeight,
+        labels,
+        pairs,
+      }).then(() => setDraftSavedAt(savedAt));
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [resortId, plan, labels, pairs, step]);
 
   if (centerLat === null || centerLng === null) {
     return (
@@ -70,7 +113,32 @@ export function MasterplanImportTool({
   const reference = { lat: centerLat, lng: centerLng };
   const selectedLabel = labels.find((l) => l.id === selectedLabelId) ?? null;
 
+  function resumeDraft() {
+    if (!foundDraft) return;
+    fileNameRef.current = foundDraft.fileName;
+    setPlan({
+      imageDataUrl: foundDraft.imageDataUrl,
+      imageWidth: foundDraft.imageWidth,
+      imageHeight: foundDraft.imageHeight,
+      labels: foundDraft.labels,
+    });
+    setLabels(foundDraft.labels);
+    setPairs(foundDraft.pairs);
+    setDraftSavedAt(foundDraft.savedAt);
+    setStep(foundDraft.step === "done" ? "review" : (foundDraft.step as Step));
+    setFoundDraft(null);
+  }
+
+  async function discardDraft() {
+    await clearDraft(resortId);
+    setFoundDraft(null);
+    setDraftSavedAt(null);
+  }
+
   async function handleFileSelected(file: File) {
+    fileNameRef.current = file.name;
+    setPickedFileName(file.name);
+    setFoundDraft(null);
     setIsParsing(true);
     setParseError(null);
     try {
@@ -176,13 +244,61 @@ export function MasterplanImportTool({
     setImportResult(result);
     setIsImporting(false);
     setStep("done");
+    // The sites now live in the database, so the local draft has served
+    // its purpose - keeping it would only offer a stale resume later.
+    if (!result.errors.length) await clearDraft(resortId);
   }
 
   const includedCount = computedSites.filter((s) => s.included).length;
 
   return (
     <div className="flex flex-col gap-6">
-      <StepIndicator step={step} />
+      <StepIndicator step={step} onGoToStep={plan ? setStep : undefined} />
+
+      {plan && draftSavedAt && step !== "done" && (
+        <p className="text-xs text-neutral-500">
+          Progress saved on this device {describeSavedAt(draftSavedAt)} — you
+          can close this and pick it up later.
+        </p>
+      )}
+
+      {step === "upload" && foundDraft && (
+        <div className="flex flex-col gap-3 rounded-md border border-blue-300 bg-blue-50 p-4">
+          <div>
+            <p className="text-sm font-medium text-blue-900">
+              Unfinished import found
+            </p>
+            {/* break-all, not break-words: overflow-wrap:break-word wraps
+                visually but does NOT reduce the element's min-content
+                width, so a long unbroken filename still forces the whole
+                page wider than a phone screen. word-break:break-all does
+                shrink it. */}
+            <p className="mt-1 break-all text-sm text-blue-900">
+              {foundDraft.labels.length} site numbers
+              {foundDraft.pairs.length > 0 &&
+                `, ${foundDraft.pairs.length} reference point${foundDraft.pairs.length === 1 ? "" : "s"}`}
+              , saved {describeSavedAt(foundDraft.savedAt)}
+              {foundDraft.fileName ? ` from ${foundDraft.fileName}` : ""}.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={resumeDraft}
+              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+            >
+              Pick up where I left off
+            </button>
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm"
+            >
+              Discard and start fresh
+            </button>
+          </div>
+        </div>
+      )}
 
       {step === "upload" && (
         <div className="flex flex-col gap-3 rounded-md border border-neutral-200 p-4">
@@ -191,13 +307,24 @@ export function MasterplanImportTool({
             site numbers, which you&apos;ll then review and calibrate against
             the satellite map.
           </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => e.target.files?.[0] && handleFileSelected(e.target.files[0])}
-            className="text-sm"
-          />
+          {/* The native file input is visually hidden and driven by this
+              label: rendered normally its control has a wide intrinsic
+              size that refuses to shrink, which pushed the whole upload
+              step wider than a phone screen. sr-only takes it out of flow
+              so it can't affect layout at all. */}
+          <label className="inline-flex w-fit cursor-pointer items-center rounded-md border border-neutral-300 px-4 py-2 text-sm hover:bg-neutral-50">
+            Choose PDF
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/pdf"
+              onChange={(e) => e.target.files?.[0] && handleFileSelected(e.target.files[0])}
+              className="sr-only"
+            />
+          </label>
+          {pickedFileName && (
+            <p className="break-all text-xs text-neutral-500">{pickedFileName}</p>
+          )}
           {isParsing && <p className="text-sm text-neutral-500">Reading PDF...</p>}
           {parseError && <p className="text-sm text-red-600">{parseError}</p>}
         </div>
@@ -433,14 +560,23 @@ export function MasterplanImportTool({
 
           {calibrationError && <p className="text-sm text-red-600">{calibrationError}</p>}
 
-          <button
-            type="button"
-            onClick={computePreview}
-            disabled={pairs.length < 2}
-            className="w-fit rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            Compute positions ({pairs.length} reference point{pairs.length === 1 ? "" : "s"})
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setStep("review")}
+              className="rounded-md border border-neutral-300 px-4 py-2 text-sm hover:bg-neutral-50"
+            >
+              Back to site numbers
+            </button>
+            <button
+              type="button"
+              onClick={computePreview}
+              disabled={pairs.length < 2}
+              className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              Compute positions ({pairs.length} reference point{pairs.length === 1 ? "" : "s"})
+            </button>
+          </div>
         </div>
       )}
 
@@ -535,7 +671,16 @@ export function MasterplanImportTool({
   );
 }
 
-function StepIndicator({ step }: { step: Step }) {
+// Steps already passed are clickable so a step can be revisited - it's
+// easy to advance before finishing the site-number review, and without
+// this the only way back was to re-upload and start over.
+function StepIndicator({
+  step,
+  onGoToStep,
+}: {
+  step: Step;
+  onGoToStep?: (step: Step) => void;
+}) {
   const steps: { key: Step; label: string }[] = [
     { key: "upload", label: "1. Upload" },
     { key: "review", label: "2. Review" },
@@ -546,18 +691,28 @@ function StepIndicator({ step }: { step: Step }) {
 
   return (
     <div className="flex flex-wrap gap-2 text-xs">
-      {steps.map((s, i) => (
-        <span
-          key={s.key}
-          className={
-            i <= activeIndex
-              ? "rounded-full bg-neutral-900 px-2 py-1 text-white"
-              : "rounded-full bg-neutral-100 px-2 py-1 text-neutral-500"
-          }
-        >
-          {s.label}
-        </span>
-      ))}
+      {steps.map((s, i) => {
+        const isDone = i <= activeIndex;
+        const canGoBack = Boolean(onGoToStep) && i < activeIndex && s.key !== "upload";
+        const className = isDone
+          ? "rounded-full bg-neutral-900 px-2 py-1 text-white"
+          : "rounded-full bg-neutral-100 px-2 py-1 text-neutral-500";
+
+        return canGoBack ? (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => onGoToStep!(s.key)}
+            className={`${className} underline underline-offset-2`}
+          >
+            {s.label}
+          </button>
+        ) : (
+          <span key={s.key} className={className}>
+            {s.label}
+          </span>
+        );
+      })}
     </div>
   );
 }
