@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { MapContainer, Marker, useMapEvents } from "react-leaflet";
-import { extractMasterplan, type ExtractedPlan, type ExtractedLabel } from "@/lib/masterplan/extract-labels";
+import type { ExtractedPlan, ExtractedLabel } from "@/lib/masterplan/extract-labels-server";
 import { fitSimilarityTransform, type PointPair } from "@/lib/geo/similarity-transform";
 import { toLocalMeters, fromLocalMeters } from "@/lib/geo/local-projection";
 import { siteDivIcon } from "@/lib/map/site-icon";
@@ -78,9 +78,18 @@ export function MasterplanImportTool({
     setIsParsing(true);
     setParseError(null);
     try {
-      const result = await extractMasterplan(file);
-      setPlan(result);
-      setLabels(result.labels);
+      const formData = new FormData();
+      formData.set("file", file);
+      const response = await fetch(`/api/resorts/${resortId}/masterplan/extract`, {
+        method: "POST",
+        body: formData,
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error ?? "Couldn't read that PDF.");
+      }
+      setPlan(result as ExtractedPlan);
+      setLabels((result as ExtractedPlan).labels);
       setStep("review");
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Couldn't read that PDF.");
