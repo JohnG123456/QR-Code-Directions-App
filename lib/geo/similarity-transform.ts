@@ -68,6 +68,36 @@ function solve4x4(A: number[][], b: number[]): number[] {
   return M.map((row, i) => row[n] / row[i]);
 }
 
+// Fits a plan image (pixel coordinates, y increasing DOWNWARD) to world
+// metres (y increasing NORTHWARD).
+//
+// That difference in y direction is a reflection, and a rotation+scale
+// model mathematically cannot express one. Fitting the raw pixel
+// coordinates therefore produces a transform that mirrors the site about
+// the line through the reference points: it still lands those points
+// exactly (so the reported residual is a reassuring zero) while placing
+// everything else hundreds of metres out.
+//
+// Flipping y up front puts both sides in the same handedness, so the
+// rotation+scale model is the right one and no reflection is needed.
+export function fitPlanToWorldTransform(pairs: PointPair[]): FitResult {
+  const flipped = pairs.map((pair) => ({
+    plan: { x: pair.plan.x, y: -pair.plan.y },
+    world: pair.world,
+  }));
+
+  const fit = fitSimilarityTransform(flipped);
+  const applyFlipped = fit.transform.apply;
+
+  return {
+    ...fit,
+    transform: {
+      ...fit.transform,
+      apply: (p: Point2D) => applyFlipped({ x: p.x, y: -p.y }),
+    },
+  };
+}
+
 export function fitSimilarityTransform(pairs: PointPair[]): FitResult {
   if (pairs.length < 2) {
     throw new Error("Need at least 2 reference point pairs to calibrate.");
