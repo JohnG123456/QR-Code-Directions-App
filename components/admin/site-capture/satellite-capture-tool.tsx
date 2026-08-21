@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { MapContainer, Marker, Popup, useMapEvents } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
 import { fixDefaultLeafletIcon } from "@/lib/map/fix-default-icon";
-import { siteDivIcon } from "@/lib/map/site-icon";
+import { siteDivIcon, labelledSiteDivIcon } from "@/lib/map/site-icon";
+import { findMissingSiteNumbers, summariseRanges } from "@/lib/sites/missing-site-numbers";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { SiteStatus } from "@/lib/types";
 import type { ActionState } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
@@ -62,6 +63,9 @@ export function SatelliteCaptureTool({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [showNumbers, setShowNumbers] = useState(true);
+  const [showMissing, setShowMissing] = useState(false);
+  const [siteNumberToPlace, setSiteNumberToPlace] = useState<string | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
 
   useEffect(() => {
@@ -117,6 +121,7 @@ export function SatelliteCaptureTool({
     ]);
     setPending(null);
     setNewSiteNumber("");
+    setSiteNumberToPlace(null);
   }
 
   async function handleDragEnd(siteId: string, lat: number, lng: number) {
@@ -174,6 +179,11 @@ export function SatelliteCaptureTool({
     }
   }
 
+  const missingSummary = findMissingSiteNumbers(
+    sites.map((s) => s.site_number),
+    totalHomes
+  );
+
   const progressLabel = totalHomes
     ? `${sites.length} of ${totalHomes} homes captured`
     : `${sites.length} homes captured`;
@@ -222,13 +232,71 @@ export function SatelliteCaptureTool({
           >
             Fit to all sites
           </button>
+          <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm">
+            <input
+              type="checkbox"
+              checked={showNumbers}
+              onChange={(e) => setShowNumbers(e.target.checked)}
+            />
+            Numbers
+          </label>
         </div>
       </div>
 
+      {missingSummary.missing.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+          <button
+            type="button"
+            onClick={() => setShowMissing((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left text-sm font-medium text-amber-900"
+          >
+            <span>
+              {missingSummary.missing.length} site number
+              {missingSummary.missing.length === 1 ? "" : "s"} still to capture
+              (checked 1-{missingSummary.upTo})
+            </span>
+            <span aria-hidden>{showMissing ? "-" : "+"}</span>
+          </button>
+
+          {showMissing && (
+            <div className="mt-2 flex flex-col gap-2">
+              <p className="text-xs text-amber-900">
+                Tap a number to load it, then tap its spot on the map.
+              </p>
+              <div className="flex max-h-32 flex-wrap gap-1 overflow-auto">
+                {missingSummary.missing.map((number) => (
+                  <button
+                    key={number}
+                    type="button"
+                    onClick={() => setSiteNumberToPlace(number)}
+                    className={
+                      siteNumberToPlace === number
+                        ? "rounded bg-amber-600 px-1.5 py-0.5 text-xs font-medium text-white"
+                        : "rounded bg-white px-1.5 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
+                    }
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+              <p className="break-words text-xs text-amber-800">
+                Gaps: {summariseRanges(missingSummary.missing).join(", ")}
+              </p>
+              {missingSummary.ignored.length > 0 && (
+                <p className="break-words text-xs text-amber-800">
+                  Not included in this check (not plain numbers):{" "}
+                  {missingSummary.ignored.join(", ")}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <p className="text-xs text-neutral-500">
-        Click anywhere on the imagery to drop a pin for a new site. Drag an
-        existing pin to correct its position. Amber = draft, green = active,
-        gray = inactive.
+        {siteNumberToPlace
+          ? `Site ${siteNumberToPlace} loaded — tap its position on the map.`
+          : "Click anywhere on the imagery to drop a pin for a new site. Drag an existing pin to correct its position. Amber = draft, green = active, gray = inactive."}
       </p>
 
       <div className="flex-1 overflow-hidden rounded-md border border-neutral-300">
@@ -239,13 +307,25 @@ export function SatelliteCaptureTool({
           ref={handleMapReady}
         >
           <BasemapTileLayer />
-          <ClickToAdd onPick={(lat, lng) => setPending({ lat, lng })} />
+          <ClickToAdd
+            onPick={(lat, lng) => {
+              setPending({ lat, lng });
+              // If staff picked one of the outstanding numbers from the
+              // panel, use it rather than making them retype it.
+              if (siteNumberToPlace) setNewSiteNumber(siteNumberToPlace);
+              setSaveError(null);
+            }}
+          />
 
           {sites.map((site) => (
             <Marker
               key={site.id}
               position={[site.lat, site.lng]}
-              icon={siteDivIcon(site.status)}
+              icon={
+                showNumbers
+                  ? labelledSiteDivIcon(site.status, site.site_number)
+                  : siteDivIcon(site.status)
+              }
               draggable
               eventHandlers={{
                 dragend: (e) => {
