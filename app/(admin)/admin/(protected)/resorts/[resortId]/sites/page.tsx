@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { setSiteStatus, deleteSite } from "./actions";
+import { setSiteStatus, deleteSite, updateSiteDetails } from "./actions";
 import { StatusSelectForm } from "@/components/admin/status-select-form";
+import { SiteDetailCells } from "@/components/admin/site-detail-cells";
 
 export default async function SitesPage({
   params,
@@ -82,8 +83,13 @@ export default async function SitesPage({
         <tbody className="divide-y divide-neutral-100">
           {(sites ?? []).map((site) => (
             <tr key={site.id}>
-              <td className="py-2 font-medium">{site.site_number}</td>
-              <td className="py-2">{site.label ?? "—"}</td>
+              <SiteDetailCells
+                siteId={site.id}
+                resortId={resortId}
+                siteNumber={site.site_number}
+                label={site.label}
+                updateSiteDetails={updateSiteDetails}
+              />
               <td className="py-2 font-mono text-xs text-neutral-500">
                 {site.lat?.toFixed(6)}, {site.lng?.toFixed(6)}
               </td>
