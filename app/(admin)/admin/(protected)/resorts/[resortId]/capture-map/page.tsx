@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchRemoteDraftSummary } from "@/lib/masterplan/remote-draft";
 import { addSite, updateSiteLocation, deleteSite, setSiteStatus } from "../sites/actions";
 import { CaptureMapClient } from "./capture-map-client";
 
@@ -20,11 +21,16 @@ export default async function CaptureMapPage({
 
   if (!resort) notFound();
 
-  const { data: sites } = await supabase
-    .from("sites")
-    .select("id, site_number, label, lat, lng, status")
-    .eq("resort_id", resortId)
-    .order("site_number");
+  const [{ data: sites }, draft] = await Promise.all([
+    supabase
+      .from("sites")
+      .select("id, site_number, label, lat, lng, status")
+      .eq("resort_id", resortId)
+      .order("site_number"),
+    // Only the calibration is needed here; the plan image itself is
+    // fetched by the tool if staff actually switch the overlay on.
+    fetchRemoteDraftSummary(supabase, resortId),
+  ]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -50,6 +56,15 @@ export default async function CaptureMapPage({
         centerLat={resort.center_lat}
         centerLng={resort.center_lng}
         defaultZoom={resort.default_zoom}
+        planCalibration={
+          draft && draft.pairs.length >= 2
+            ? {
+                pairs: draft.pairs,
+                imageWidth: draft.imageWidth,
+                imageHeight: draft.imageHeight,
+              }
+            : null
+        }
         addSite={addSite}
         updateSiteLocation={updateSiteLocation}
         deleteSite={deleteSite}

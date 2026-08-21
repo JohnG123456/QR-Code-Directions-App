@@ -8,6 +8,9 @@ import { dedupeImportRows, mergeImportRows } from "@/lib/sites/merge-import-rows
 export interface ActionState {
   error?: string;
   success?: boolean;
+  /** Id of the row just created, so the caller can address it afterwards
+   *  (to move, delete or activate it) without reloading the page. */
+  siteId?: string;
 }
 
 const addSiteSchema = z.object({
@@ -38,13 +41,21 @@ export async function addSite(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.from("sites").insert({
-    resort_id: parsed.data.resortId,
-    site_number: parsed.data.siteNumber,
-    location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})`,
-    gps_accuracy_m: parsed.data.accuracy ?? null,
-    status: "draft",
-  });
+  // The new row's id comes back so the map can address the pin it just
+  // dropped. Inventing one client-side meant every later edit to that
+  // pin - moving it, deleting it, activating it - was aimed at a row
+  // that didn't exist, matched nothing, and was silently ignored.
+  const { data, error } = await supabase
+    .from("sites")
+    .insert({
+      resort_id: parsed.data.resortId,
+      site_number: parsed.data.siteNumber,
+      location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})`,
+      gps_accuracy_m: parsed.data.accuracy ?? null,
+      status: "draft",
+    })
+    .select("id")
+    .single();
 
   if (error) {
     return {
@@ -57,7 +68,8 @@ export async function addSite(
 
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-sites`);
-  return { success: true };
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-map`);
+  return { success: true, siteId: data.id };
 }
 
 const importRowSchema = z.object({
@@ -161,13 +173,18 @@ export async function setSiteStatus(formData: FormData) {
   });
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { error, count } = await supabase
     .from("sites")
-    .update({ status: parsed.status })
+    .update({ status: parsed.status }, { count: "exact" })
     .eq("id", parsed.siteId);
 
   if (error) throw new Error(error.message);
+  // Postgres treats "no row matched" as a perfectly successful update, so
+  // without this an edit aimed at a stale id reports success and changes
+  // nothing.
+  if (!count) throw new Error("That site no longer exists — reload the page.");
   revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
+  revalidatePath(`/admin/resorts/${parsed.resortId}/capture-map`);
 }
 
 const deleteSiteSchema = z.object({
@@ -182,10 +199,15 @@ export async function deleteSite(formData: FormData) {
   });
 
   const supabase = await createClient();
-  const { error } = await supabase.from("sites").delete().eq("id", parsed.siteId);
+  const { error, count } = await supabase
+    .from("sites")
+    .delete({ count: "exact" })
+    .eq("id", parsed.siteId);
 
   if (error) throw new Error(error.message);
+  if (!count) throw new Error("That site no longer exists — reload the page.");
   revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
+  revalidatePath(`/admin/resorts/${parsed.resortId}/capture-map`);
 }
 
 const updateSiteDetailsSchema = z.object({
@@ -262,14 +284,16 @@ export async function updateSiteLocation(
   }
 
   const supabase = await createClient();
-  const { error } = await supabase
+  const { error, count } = await supabase
     .from("sites")
-    .update({
-      location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})`,
-    })
+    .update(
+      { location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})` },
+      { count: "exact" }
+    )
     .eq("id", parsed.data.siteId);
 
   if (error) return { error: error.message };
+  if (!count) return { error: "That site no longer exists — reload the page." };
 
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-map`);
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
