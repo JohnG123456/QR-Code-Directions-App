@@ -77,10 +77,15 @@ published to OpenStreetMap) is Phase 2, not built yet.
   math behind master plan calibration: project lat/lng to local metres
   around a reference point, then fit a least-squares scale/rotation/
   translation from a handful of staff-picked reference point pairs.
-- `lib/masterplan/extract-labels.ts` — browser-only PDF parsing
-  (`pdfjs-dist`): renders page 1 to an image and pulls out candidate site
-  number text labels with their pixel position, for the master plan
-  import tool to calibrate and place.
+- `lib/masterplan/extract-labels-server.ts` — server-side PDF parsing
+  (`pdfjs-dist` + `@napi-rs/canvas`, called from
+  `app/api/resorts/[resortId]/masterplan/extract`): renders page 1 to an
+  image and pulls out candidate site number text labels with their pixel
+  position, for the master plan import tool to calibrate and place. Runs
+  server-side rather than in the browser because PDF rendering had real
+  compatibility gaps across mobile browsers; `@napi-rs/canvas` is listed
+  in `next.config.ts`'s `serverExternalPackages` since bundling a native
+  addon breaks its own runtime binary resolution.
 - `supabase/migrations/0001_init.sql` — schema, RLS, and public views.
   `graph_nodes`/`graph_edges` are created here but unused until Phase 2.
 
