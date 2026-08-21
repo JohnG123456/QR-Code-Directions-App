@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, Marker, useMapEvents } from "react-leaflet";
 import type { ExtractedPlan, ExtractedLabel } from "@/lib/masterplan/extract-labels-server";
-import { fitSimilarityTransform, type PointPair } from "@/lib/geo/similarity-transform";
+import { fitPlanToWorldTransform, type PointPair } from "@/lib/geo/similarity-transform";
 import { toLocalMeters, fromLocalMeters } from "@/lib/geo/local-projection";
 import { siteDivIcon } from "@/lib/map/site-icon";
 import { ZoomablePlan } from "@/components/admin/masterplan/zoomable-plan";
@@ -59,7 +59,12 @@ export function MasterplanImportTool({
   const [calibrationError, setCalibrationError] = useState<string | null>(null);
 
   const [computedSites, setComputedSites] = useState<ComputedSite[]>([]);
-  const [fitStats, setFitStats] = useState<{ rms: number; max: number } | null>(null);
+  const [fitStats, setFitStats] = useState<{
+    rms: number;
+    max: number;
+    pointCount: number;
+    residuals: number[];
+  } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
@@ -204,8 +209,13 @@ export function MasterplanImportTool({
   function computePreview() {
     setCalibrationError(null);
     try {
-      const fit = fitSimilarityTransform(pairs);
-      setFitStats({ rms: fit.rmsErrorMeters, max: fit.maxErrorMeters });
+      const fit = fitPlanToWorldTransform(pairs);
+      setFitStats({
+        rms: fit.rmsErrorMeters,
+        max: fit.maxErrorMeters,
+        pointCount: pairs.length,
+        residuals: fit.residualsMeters,
+      });
 
       const sites: ComputedSite[] = labels.map((label) => {
         const worldXY = fit.transform.apply({ x: label.x, y: label.y });
@@ -582,19 +592,33 @@ export function MasterplanImportTool({
 
       {step === "preview" && (
         <div className="flex flex-col gap-3">
-          {fitStats && (
-            <p className="text-sm text-neutral-600">
-              Calibration fit: average error{" "}
-              <strong>{fitStats.rms.toFixed(1)} m</strong>, worst point{" "}
-              <strong>{fitStats.max.toFixed(1)} m</strong>.{" "}
-              {fitStats.rms > 5 && (
-                <span className="text-amber-600">
-                  That&apos;s a fairly loose fit - consider going back and
-                  adding a couple more spread-out reference points.
-                </span>
-              )}
-            </p>
-          )}
+          {fitStats &&
+            (fitStats.pointCount < 3 ? (
+              // With 2 points the fit is exact by construction - there are
+              // exactly as many equations as unknowns - so reporting "0.0 m
+              // error" would look like a perfect calibration while actually
+              // measuring nothing. Say so plainly instead.
+              <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                With only 2 reference points the fit always lands both
+                exactly, so there&apos;s no error figure to report and no way
+                to tell if a point was misplaced. Check the pins below against
+                the imagery — and if anything looks off, go back and add a
+                third point far from the other two.
+              </p>
+            ) : (
+              <p className="text-sm text-neutral-600">
+                Calibration fit across {fitStats.pointCount} reference points:
+                average error <strong>{fitStats.rms.toFixed(1)} m</strong>,
+                worst point <strong>{fitStats.max.toFixed(1)} m</strong>{" "}
+                (point {fitStats.residuals.indexOf(fitStats.max) + 1}).{" "}
+                {fitStats.rms > 5 && (
+                  <span className="text-amber-600">
+                    That&apos;s a loose fit — the worst point is the one most
+                    likely misplaced, so go back and re-pick it.
+                  </span>
+                )}
+              </p>
+            ))}
           <div className="h-96 overflow-hidden rounded-md border border-neutral-300">
             <PreviewMap
               centerLat={centerLat}
