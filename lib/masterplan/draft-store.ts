@@ -23,6 +23,11 @@ export interface MasterplanDraft {
   resortId: string;
   fileName: string | null;
   savedAt: number;
+  /** When these sites were last pushed to the database, if ever. The draft
+   *  deliberately outlives the import: a first pass is often partial, and
+   *  the reviewed numbers plus calibration are exactly what you need to
+   *  carry on afterwards. */
+  lastImportedAt?: number;
   step: string;
   imageDataUrl: string;
   imageWidth: number;
@@ -66,8 +71,12 @@ async function withStore<T>(
   }
 }
 
-export async function saveDraft(draft: MasterplanDraft): Promise<void> {
-  await withStore("readwrite", (store) => store.put(draft));
+// Returns false if the draft could not be stored (private mode, storage
+// disabled, over quota). Callers surface that rather than letting staff
+// believe hours of review are safely saved when they aren't.
+export async function saveDraft(draft: MasterplanDraft): Promise<boolean> {
+  const result = await withStore<IDBValidKey>("readwrite", (store) => store.put(draft));
+  return result !== null;
 }
 
 export async function loadDraft(resortId: string): Promise<MasterplanDraft | null> {

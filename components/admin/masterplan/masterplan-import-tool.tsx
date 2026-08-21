@@ -73,6 +73,8 @@ export function MasterplanImportTool({
   const [pickedFileName, setPickedFileName] = useState<string | null>(null);
   const [foundDraft, setFoundDraft] = useState<MasterplanDraft | null>(null);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  const [lastImportedAt, setLastImportedAt] = useState<number | null>(null);
+  const [saveFailed, setSaveFailed] = useState(false);
 
   // Offer to pick up an unfinished review from a previous sitting.
   useEffect(() => {
@@ -101,10 +103,14 @@ export function MasterplanImportTool({
         imageHeight: plan.imageHeight,
         labels,
         pairs,
-      }).then(() => setDraftSavedAt(savedAt));
+        lastImportedAt: lastImportedAt ?? undefined,
+      }).then((ok) => {
+        setSaveFailed(!ok);
+        if (ok) setDraftSavedAt(savedAt);
+      });
     }, 800);
     return () => clearTimeout(timer);
-  }, [resortId, plan, labels, pairs, step]);
+  }, [resortId, plan, labels, pairs, step, lastImportedAt]);
 
   if (centerLat === null || centerLng === null) {
     return (
@@ -130,6 +136,7 @@ export function MasterplanImportTool({
     setLabels(foundDraft.labels);
     setPairs(foundDraft.pairs);
     setDraftSavedAt(foundDraft.savedAt);
+    setLastImportedAt(foundDraft.lastImportedAt ?? null);
     setStep(foundDraft.step === "done" ? "review" : (foundDraft.step as Step));
     setFoundDraft(null);
   }
@@ -254,9 +261,29 @@ export function MasterplanImportTool({
     setImportResult(result);
     setIsImporting(false);
     setStep("done");
-    // The sites now live in the database, so the local draft has served
-    // its purpose - keeping it would only offer a stale resume later.
-    if (!result.errors.length) await clearDraft(resortId);
+
+    // Deliberately keep the draft. A first import is usually partial - a
+    // test run, or one stage of a resort - and the reviewed site numbers
+    // and calibration are exactly what's needed to carry on afterwards.
+    // Discarding them here meant coming back to nothing and starting over.
+    if (!result.errors.length && plan) {
+      const importedAt = Date.now();
+      setLastImportedAt(importedAt);
+      const ok = await saveDraft({
+        resortId,
+        fileName: fileNameRef.current,
+        savedAt: importedAt,
+        lastImportedAt: importedAt,
+        // Land back on the review step, where any further numbers get added.
+        step: "review",
+        imageDataUrl: plan.imageDataUrl,
+        imageWidth: plan.imageWidth,
+        imageHeight: plan.imageHeight,
+        labels,
+        pairs,
+      });
+      setSaveFailed(!ok);
+    }
   }
 
   const includedCount = computedSites.filter((s) => s.included).length;
@@ -265,7 +292,16 @@ export function MasterplanImportTool({
     <div className="flex flex-col gap-6">
       <StepIndicator step={step} onGoToStep={plan ? setStep : undefined} />
 
-      {plan && draftSavedAt && step !== "done" && (
+      {plan && saveFailed && (
+        <p className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-800">
+          <strong>Progress is not being saved on this device.</strong> Browser
+          storage looks unavailable (private browsing, or storage is full or
+          blocked). Finish and import in this sitting, or your review will be
+          lost when you close the page.
+        </p>
+      )}
+
+      {plan && !saveFailed && draftSavedAt && step !== "done" && (
         <p className="text-xs text-neutral-500">
           Progress saved on this device {describeSavedAt(draftSavedAt)} — you
           can close this and pick it up later.
@@ -289,6 +325,9 @@ export function MasterplanImportTool({
                 `, ${foundDraft.pairs.length} reference point${foundDraft.pairs.length === 1 ? "" : "s"}`}
               , saved {describeSavedAt(foundDraft.savedAt)}
               {foundDraft.fileName ? ` from ${foundDraft.fileName}` : ""}.
+              {foundDraft.lastImportedAt
+                ? ` Already imported ${describeSavedAt(foundDraft.lastImportedAt)} — pick up to add more or re-import.`
+                : ""}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -681,6 +720,11 @@ export function MasterplanImportTool({
             Imported/updated {importResult.inserted} sites as drafts. Review
             and activate them from the Sites list, or fine-tune positions in
             the satellite capture tool.
+          </p>
+          <p className="text-sm text-neutral-600">
+            Your reviewed site numbers and calibration are still saved on this
+            device, so you can come back to this screen to add more numbers and
+            import again without starting over.
           </p>
           {importResult.errors.length > 0 && (
             <ul className="list-disc pl-5 text-sm text-red-600">
