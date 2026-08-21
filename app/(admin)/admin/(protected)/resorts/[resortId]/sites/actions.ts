@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import type { SiteStatus } from "@/lib/types";
+import { mergeImportRows } from "@/lib/sites/merge-import-rows";
 
 export interface ActionState {
   error?: string;
@@ -100,12 +100,26 @@ export async function bulkUpsertSites(
     return { inserted: 0, errors };
   }
 
+  // Read what's already stored so re-importing doesn't undo curation -
+  // see lib/sites/merge-import-rows.ts. Fetches every site for the resort
+  // rather than filtering by the incoming numbers: it's one small query
+  // either way, and avoids building a filter with hundreds of values.
+  const { data: existing, error: existingError } = await supabase
+    .from("sites")
+    .select("site_number, status, label")
+    .eq("resort_id", resortId);
+
+  if (existingError) {
+    errors.push(existingError.message);
+    return { inserted: 0, errors };
+  }
+
   const { error, count } = await supabase
     .from("sites")
-    .upsert(
-      validRows.map((row) => ({ ...row, resort_id: resortId, status: "draft" as SiteStatus })),
-      { onConflict: "resort_id,site_number", count: "exact" }
-    );
+    .upsert(mergeImportRows(resortId, validRows, existing ?? []), {
+      onConflict: "resort_id,site_number",
+      count: "exact",
+    });
 
   if (error) {
     errors.push(error.message);
@@ -155,6 +169,55 @@ export async function deleteSite(formData: FormData) {
 
   if (error) throw new Error(error.message);
   revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
+}
+
+const updateSiteDetailsSchema = z.object({
+  siteId: z.string().uuid(),
+  resortId: z.string().uuid(),
+  siteNumber: z.string().trim().min(1, "Site number is required"),
+  label: z.string().trim().optional(),
+});
+
+// Renaming a site number or editing its label from the sites list.
+// Site numbers are what visitors search on and what re-imports match on,
+// so a typo caught later needs correcting in place rather than by
+// deleting and re-adding (which would lose the captured position).
+export async function updateSiteDetails(
+  _prevState: ActionState,
+  formData: FormData
+): Promise<ActionState> {
+  const parsed = updateSiteDetailsSchema.safeParse({
+    siteId: formData.get("siteId"),
+    resortId: formData.get("resortId"),
+    siteNumber: formData.get("siteNumber"),
+    label: formData.get("label") ?? undefined,
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("sites")
+    .update({
+      site_number: parsed.data.siteNumber,
+      label: parsed.data.label || null,
+    })
+    .eq("id", parsed.data.siteId);
+
+  if (error) {
+    return {
+      error:
+        error.code === "23505"
+          ? `Site ${parsed.data.siteNumber} already exists for this resort.`
+          : error.message,
+    };
+  }
+
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-map`);
+  return { success: true };
 }
 
 const updateSiteLocationSchema = z.object({
