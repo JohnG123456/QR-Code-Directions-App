@@ -266,7 +266,7 @@ export function MasterplanImportTool({
     // test run, or one stage of a resort - and the reviewed site numbers
     // and calibration are exactly what's needed to carry on afterwards.
     // Discarding them here meant coming back to nothing and starting over.
-    if (!result.errors.length && plan) {
+    if (result.inserted > 0 && plan) {
       const importedAt = Date.now();
       setLastImportedAt(importedAt);
       const ok = await saveDraft({
@@ -716,16 +716,33 @@ export function MasterplanImportTool({
 
       {step === "done" && importResult && (
         <div className="flex flex-col gap-2">
-          <p className="text-sm text-green-700">
-            Imported/updated {importResult.inserted} sites as drafts. Review
-            and activate them from the Sites list, or fine-tune positions in
-            the satellite capture tool.
-          </p>
-          <p className="text-sm text-neutral-600">
-            Your reviewed site numbers and calibration are still saved on this
-            device, so you can come back to this screen to add more numbers and
-            import again without starting over.
-          </p>
+          {importResult.inserted > 0 ? (
+            <>
+              <p className="text-sm text-green-700">
+                Imported/updated {importResult.inserted} sites as drafts.
+                Review and activate them from the Sites list, or fine-tune
+                positions in the satellite capture tool.
+              </p>
+              <p className="text-sm text-neutral-600">
+                Your reviewed site numbers and calibration are still saved on
+                this device, so you can come back to this screen to add more
+                numbers and import again without starting over.
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-red-700">
+              Nothing was imported. Your reviewed site numbers and calibration
+              are still saved on this device, so you can fix the problem below
+              and try again.
+            </p>
+          )}
+          {importResult.warnings.length > 0 && (
+            <ul className="list-disc pl-5 text-sm text-amber-700">
+              {importResult.warnings.map((warning, i) => (
+                <li key={i}>{warning}</li>
+              ))}
+            </ul>
+          )}
           {importResult.errors.length > 0 && (
             <ul className="list-disc pl-5 text-sm text-red-600">
               {importResult.errors.map((err, i) => (
