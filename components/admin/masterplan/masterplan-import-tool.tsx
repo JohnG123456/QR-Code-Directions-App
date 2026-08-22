@@ -100,7 +100,8 @@ export function MasterplanImportTool({
   // state someone lands in if they reviewed a plan before drafts were
   // kept on the server, or if the upload that should have created the
   // server copy failed.
-  const [accountCopyMissing, setAccountCopyMissing] = useState(false);
+  const [localDraft, setLocalDraft] = useState<MasterplanDraft | null>(null);
+  const [accountDraftSavedAt, setAccountDraftSavedAt] = useState<number | null>(null);
   const [uploadingToAccount, setUploadingToAccount] = useState(false);
 
   // Offer to pick up an unfinished review from a previous sitting - from
@@ -118,7 +119,8 @@ export function MasterplanImportTool({
         .filter((d): d is DraftPreview => d !== null)
         .sort((a, b) => b.savedAt - a.savedAt)[0];
       if (newest) setFoundDraft(newest);
-      setAccountCopyMissing(local !== null && remote === null);
+      setLocalDraft(local);
+      setAccountDraftSavedAt(remote?.savedAt ?? null);
     });
     return () => {
       cancelled = true;
@@ -218,7 +220,7 @@ export function MasterplanImportTool({
         setRemoteSaveFailed(true);
         return false;
       }
-      setAccountCopyMissing(false);
+      setAccountDraftSavedAt(Date.now());
       setRemoteSaveFailed(false);
       setDraftSavedAt(Date.now());
       return true;
@@ -285,8 +287,12 @@ export function MasterplanImportTool({
     // shouldn't go on a mis-tap, so confirm first when there's something
     // to lose.
     if (foundDraft || plan) {
+      // Name the way out. Being told the plan isn't in your account and
+      // then being warned that the only visible route to fix it destroys
+      // your review is a dead end - the button above does it without
+      // touching anything.
       const confirmed = window.confirm(
-        "This replaces the saved review for this resort with a fresh scan of the new PDF. Your reviewed site numbers and calibration points will be lost. Continue?"
+        "This replaces the saved review for this resort with a fresh scan of the new PDF. Your reviewed site numbers and calibration points will be lost.\n\nIf you only want the plan saved to your account, cancel and use \"Save this draft to my account\" instead - that keeps everything.\n\nContinue?"
       );
       if (!confirmed) {
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -553,27 +559,43 @@ export function MasterplanImportTool({
           </div>
           {resumeError && <p className="text-sm text-red-700">{resumeError}</p>}
 
-          {accountCopyMissing && foundDraft.imageDataUrl && (
+          <p className="text-xs text-blue-800">
+            {accountDraftSavedAt === null
+              ? "Held on this device only — not in your account."
+              : `Also in your account, saved ${describeSavedAt(accountDraftSavedAt)}.`}
+          </p>
+
+          {/* Offered whenever this device holds work the account doesn't
+              have yet, not only when the account has nothing at all: a
+              stale account copy is just as stuck, and re-uploading the
+              PDF - the only other route - destroys the review. */}
+          {localDraft && (accountDraftSavedAt === null || localDraft.savedAt > accountDraftSavedAt) && (
             <div className="flex flex-col gap-2 rounded-md bg-white/70 p-3">
               <p className="text-sm text-blue-900">
-                This draft is only on this device. Saving it to your account
-                keeps it if this browser is cleared, makes it available on your
-                other devices, and lets the plan be shown over the satellite
-                map and the road network.
+                {accountDraftSavedAt === null
+                  ? "This draft is only on this device."
+                  : "This device has newer work than your account copy."}{" "}
+                Saving it to your account keeps it if this browser is cleared,
+                makes it available on your other devices, and lets the plan be
+                shown over the satellite map and the road network.{" "}
+                <strong>
+                  This does not re-scan the PDF — nothing you&apos;ve reviewed
+                  is lost.
+                </strong>
               </p>
               <button
                 type="button"
                 disabled={uploadingToAccount}
                 onClick={() =>
                   void saveDraftToAccount({
-                    fileName: foundDraft.fileName,
-                    step: foundDraft.step,
-                    imageDataUrl: foundDraft.imageDataUrl!,
-                    imageWidth: foundDraft.imageWidth,
-                    imageHeight: foundDraft.imageHeight,
-                    labels: foundDraft.labels,
-                    pairs: foundDraft.pairs,
-                    lastImportedAt: foundDraft.lastImportedAt,
+                    fileName: localDraft.fileName,
+                    step: localDraft.step,
+                    imageDataUrl: localDraft.imageDataUrl,
+                    imageWidth: localDraft.imageWidth,
+                    imageHeight: localDraft.imageHeight,
+                    labels: localDraft.labels,
+                    pairs: localDraft.pairs,
+                    lastImportedAt: localDraft.lastImportedAt,
                   })
                 }
                 className="w-fit rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
