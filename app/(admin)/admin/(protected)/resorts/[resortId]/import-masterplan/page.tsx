@@ -31,10 +31,31 @@ export default async function ImportMasterplanPage({
         </Link>
         <h1 className="mt-1 text-xl font-semibold">Import sites from master plan</h1>
         <p className="mt-1 text-sm text-neutral-500">
-          Upload a scaled site plan PDF, review the site numbers it finds,
-          calibrate it against the satellite map, then bulk-import the
-          computed positions as draft sites.
+          A one-off starting point: a scaled site plan PDF is scanned for
+          site numbers, matched to the satellite map, and the resulting
+          positions are written in as draft sites.
         </p>
+        <div className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-600">
+          <p>
+            <strong>Use this once per plan revision.</strong> Everything
+            afterwards - correcting a misread number, moving a pin, adding one
+            the scan missed, deleting one that isn&apos;t a site - belongs in{" "}
+            <Link
+              href={`/admin/resorts/${resortId}/capture-map`}
+              className="font-medium text-neutral-900 underline"
+            >
+              Capture sites from satellite imagery
+            </Link>
+            , which edits the real positions directly, over the same master
+            plan.
+          </p>
+          <p className="mt-2">
+            Importing again re-adds <em>every</em> number in the reviewed list
+            above, including ones you have since deleted on the map. That is
+            what you want for a new revision of the plan, and not what you want
+            for a fix.
+          </p>
+        </div>
       </div>
 
       <MasterplanClient

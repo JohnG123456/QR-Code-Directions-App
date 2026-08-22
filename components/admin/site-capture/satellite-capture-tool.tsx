@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { MapContainer, Marker, Popup, useMap, useMapEvents } from "react-leaflet";
-import type { Map as LeafletMap, Marker as LeafletMarker } from "leaflet";
+import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
+import type { Map as LeafletMap } from "leaflet";
 import { fixDefaultLeafletIcon } from "@/lib/map/fix-default-icon";
 import { siteDivIcon, labelledSiteDivIcon } from "@/lib/map/site-icon";
 import { findMissingSiteNumbers, summariseRanges } from "@/lib/sites/missing-site-numbers";
@@ -38,7 +38,8 @@ type UndoEntry =
   | { kind: "move"; siteId: string; siteNumber: string; lat: number; lng: number }
   | { kind: "add"; siteId: string; siteNumber: string }
   | { kind: "delete"; site: CapturedSite }
-  | { kind: "status"; siteId: string; siteNumber: string; status: SiteStatus };
+  | { kind: "status"; siteId: string; siteNumber: string; status: SiteStatus }
+  | { kind: "rename"; siteId: string; siteNumber: string };
 
 const UNDO_LIMIT = 25;
 const PINS_LOCKED_KEY = "capture-pins-locked";
@@ -58,6 +59,8 @@ function describeUndo(entry: UndoEntry): string {
       return `deleting ${entry.site.site_number}`;
     case "status":
       return `status of ${entry.siteNumber}`;
+    case "rename":
+      return `renaming ${entry.siteNumber}`;
   }
 }
 
@@ -201,6 +204,7 @@ export function SatelliteCaptureTool({
   planUnavailable,
   addSite,
   updateSiteLocation,
+  updateSiteDetails,
   deleteSite,
   restoreSite,
   setSiteStatus,
@@ -220,6 +224,7 @@ export function SatelliteCaptureTool({
   planUnavailable: "not-migrated" | "no-plan" | "not-calibrated" | null;
   addSite: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   updateSiteLocation: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
+  updateSiteDetails: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   deleteSite: (formData: FormData) => Promise<void>;
   restoreSite: (input: {
     resortId: string;
@@ -263,8 +268,12 @@ export function SatelliteCaptureTool({
     }
   }
   const [showMissing, setShowMissing] = useState(false);
+  const [showUnexpected, setShowUnexpected] = useState(false);
   const [siteNumberToPlace, setSiteNumberToPlace] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedSiteId, setSelectedSiteId] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const [isUndoing, setIsUndoing] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
@@ -272,19 +281,6 @@ export function SatelliteCaptureTool({
   const [planImage, setPlanImage] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const mapRef = useRef<LeafletMap | null>(null);
-  const pendingMarkerRef = useRef<LeafletMarker | null>(null);
-
-  // Open the number box as soon as a pin lands. Leaflet waits for a tap
-  // on the marker otherwise, which just looks like a stray dot appeared -
-  // and the dot is a smaller target than the map you just tapped.
-  //
-  // In an effect rather than the marker's ref callback: the popup binds
-  // itself in its own effect, and children's effects run before the
-  // parent's, so opening it from the ref sometimes lands too early and
-  // does nothing.
-  useEffect(() => {
-    if (pending) pendingMarkerRef.current?.openPopup();
-  }, [pending]);
 
   // The master plan, georeferenced by the calibration the import already
   // captured. Checking a number against the printed plan is the whole job
@@ -408,6 +404,7 @@ export function SatelliteCaptureTool({
     const removed = previous.find((s) => s.id === siteId);
     setActionError(null);
     setSites((prev) => prev.filter((s) => s.id !== siteId));
+    if (selectedSiteId === siteId) setSelectedSiteId(null);
 
     const formData = new FormData();
     formData.set("siteId", siteId);
@@ -419,6 +416,40 @@ export function SatelliteCaptureTool({
       setSites(previous);
       setActionError(`Site ${siteNumber} couldn't be deleted — it's still there.`);
     }
+  }
+
+  // Correcting a misread number is the single commonest fix after an
+  // import off a drawing - a 1 read as a 7, a stage number picked up as a
+  // site - and until now it meant leaving the map for the sites list,
+  // where you can't see which house you're looking at.
+  async function handleRename(siteId: string, nextNumber: string) {
+    const trimmed = nextNumber.trim();
+    const before = sites.find((s) => s.id === siteId);
+    if (!before || !trimmed || trimmed === before.site_number) {
+      setRenamingId(null);
+      return;
+    }
+
+    setActionError(null);
+    const formData = new FormData();
+    formData.set("siteId", siteId);
+    formData.set("resortId", resortId);
+    formData.set("siteNumber", trimmed);
+    // Carried through deliberately: the action treats an absent label as
+    // "clear it", so leaving it out would wipe the label on every rename.
+    formData.set("label", before.label ?? "");
+
+    const result = await updateSiteDetails({}, formData);
+    if (result.error) {
+      setActionError(result.error);
+      return;
+    }
+
+    setSites((prev) =>
+      prev.map((s) => (s.id === siteId ? { ...s, site_number: trimmed } : s))
+    );
+    pushUndo({ kind: "rename", siteId, siteNumber: before.site_number });
+    setRenamingId(null);
   }
 
   async function handleStatusChange(siteId: string, status: SiteStatus) {
@@ -491,6 +522,23 @@ export function SatelliteCaptureTool({
         // exists can never be undone, so drop it rather than leave a step
         // that fails every time it's reached.
         setUndoStack((prev) => prev.filter((e) => undoTarget(e) !== entry.siteId));
+      } else if (entry.kind === "rename") {
+        const current = sites.find((s) => s.id === entry.siteId);
+        const formData = new FormData();
+        formData.set("siteId", entry.siteId);
+        formData.set("resortId", resortId);
+        formData.set("siteNumber", entry.siteNumber);
+        formData.set("label", current?.label ?? "");
+        const result = await updateSiteDetails({}, formData);
+        if (result.error) {
+          failed(result.error);
+        } else {
+          setSites((prev) =>
+            prev.map((s) =>
+              s.id === entry.siteId ? { ...s, site_number: entry.siteNumber } : s
+            )
+          );
+        }
       } else if (entry.kind === "delete") {
         const result = await restoreSite({
           resortId,
@@ -531,14 +579,23 @@ export function SatelliteCaptureTool({
     }
   }
 
-  function handleSearch() {
+  function jumpTo(siteNumber: string) {
     const match = sites.find(
-      (s) => s.site_number.toLowerCase() === searchTerm.trim().toLowerCase()
+      (s) => s.site_number.toLowerCase() === siteNumber.trim().toLowerCase()
     );
     if (match && mapRef.current) {
+      setSearchTerm(match.site_number);
+      setSelectedSiteId(match.id);
+      setRenamingId(null);
       mapRef.current.flyTo([match.lat, match.lng], 21);
     }
   }
+
+  function handleSearch() {
+    jumpTo(searchTerm);
+  }
+
+  const selectedSite = sites.find((s) => s.id === selectedSiteId) ?? null;
 
   const missingSummary = findMissingSiteNumbers(
     sites.map((s) => s.site_number),
@@ -648,6 +705,45 @@ export function SatelliteCaptureTool({
         </div>
       </div>
 
+      {missingSummary.unexpected.length > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+          <button
+            type="button"
+            onClick={() => setShowUnexpected((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left text-sm font-medium text-amber-900"
+          >
+            <span>
+              {missingSummary.unexpected.length} number
+              {missingSummary.unexpected.length === 1 ? " is" : "s are"} above
+              the {totalHomes} homes at this resort
+            </span>
+            <span aria-hidden>{showUnexpected ? "-" : "+"}</span>
+          </button>
+          {showUnexpected && (
+            <div className="mt-2 flex flex-col gap-2">
+              <p className="text-xs text-amber-900">
+                Scanning a drawing picks up stage numbers, drawing references
+                and misread digits. If the total is right, each of these is
+                either a typo for one of the missing numbers or isn&apos;t a
+                site at all. Tap one to go to it, then rename or delete it.
+              </p>
+              <div className="flex max-h-32 flex-wrap gap-1 overflow-auto">
+                {missingSummary.unexpected.map((number) => (
+                  <button
+                    key={number}
+                    type="button"
+                    onClick={() => jumpTo(number)}
+                    className="rounded bg-white px-1.5 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
+                  >
+                    {number}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {planLoading && (
         <p className="text-xs text-neutral-500">Loading the master plan image…</p>
       )}
@@ -662,23 +758,149 @@ export function SatelliteCaptureTool({
           now the only way to get rid of it was to find the popup again.
           A pin you can't put down is alarming when you're not sure
           whether it saved. */}
+      {/* Editing lives here rather than in a map popup. A tap inside a
+          Leaflet popup reaches the map underneath, and the map closes its
+          popup on tap, so the first tap on any control shut the thing it
+          was in - a rename box could be opened but never filled in. A
+          panel above the map also gives full-size touch targets and stays
+          put while the map moves. */}
       {pending && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <span>
-            Unsaved pin dropped{newSiteNumber.trim() ? ` for site ${newSiteNumber.trim()}` : ""}.
-            Tap it to enter a number, or remove it.
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setPending(null);
-              setNewSiteNumber("");
-              setSaveError(null);
-            }}
-            className="rounded-md border border-amber-400 bg-white px-2 py-1 text-xs font-medium"
-          >
-            Remove pin
-          </button>
+        <div className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+          <label className="flex flex-col gap-1 font-medium">
+            New pin — site number
+            <input
+              autoFocus
+              value={newSiteNumber}
+              onChange={(e) => setNewSiteNumber(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSaveNewSite()}
+              inputMode="numeric"
+              className="w-32 rounded border border-neutral-300 bg-white px-2 py-1 text-base text-neutral-900"
+            />
+          </label>
+          {saveError && <p className="text-red-700">{saveError}</p>}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={isSaving || !newSiteNumber.trim()}
+              onClick={handleSaveNewSite}
+              className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {isSaving ? "Saving..." : "Save site"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPending(null);
+                setNewSiteNumber("");
+                setSaveError(null);
+              }}
+              className="rounded-md border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium"
+            >
+              Remove pin
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!pending && selectedSite && (
+        <div className="flex flex-col gap-2 rounded-md border border-neutral-300 bg-white p-3 text-sm">
+          {renamingId === selectedSite.id ? (
+            <label className="flex flex-col gap-1 font-medium">
+              Site number
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleRename(selectedSite.id, renameValue);
+                  if (e.key === "Escape") setRenamingId(null);
+                }}
+                inputMode="numeric"
+                className="w-32 rounded border border-neutral-300 px-2 py-1 text-base"
+              />
+            </label>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <strong className="text-base">Site {selectedSite.site_number}</strong>
+              {selectedSite.label && (
+                <span className="text-neutral-500">{selectedSite.label}</span>
+              )}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {renamingId === selectedSite.id ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handleRename(selectedSite.id, renameValue)}
+                  className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white"
+                >
+                  Save number
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRenamingId(null)}
+                  className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRenamingId(selectedSite.id);
+                    setRenameValue(selectedSite.site_number);
+                  }}
+                  className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
+                >
+                  Rename
+                </button>
+                <label className="flex items-center gap-1.5">
+                  Status
+                  <select
+                    value={selectedSite.status}
+                    onChange={(e) =>
+                      handleStatusChange(selectedSite.id, e.target.value as SiteStatus)
+                    }
+                    className="rounded border border-neutral-300 px-2 py-1"
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleDelete(selectedSite.id, selectedSite.site_number)
+                  }
+                  className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700"
+                >
+                  Delete
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSiteId(null)}
+                  className="ml-auto text-neutral-500 underline"
+                >
+                  Done
+                </button>
+              </>
+            )}
+          </div>
+
+          {pinsLocked && (
+            <button
+              type="button"
+              onClick={() => togglePinsLocked(false)}
+              className="w-fit text-left text-xs text-neutral-500 underline"
+            >
+              Pins are locked — unlock to drag this one
+            </button>
+          )}
         </div>
       )}
 
@@ -768,6 +990,7 @@ export function SatelliteCaptureTool({
           <ClickToAdd
             onPick={(lat, lng) => {
               setPending({ lat, lng });
+              setSelectedSiteId(null);
               // If staff picked one of the outstanding numbers from the
               // panel, use it rather than making them retype it.
               if (siteNumberToPlace) setNewSiteNumber(siteNumberToPlace);
@@ -781,100 +1004,35 @@ export function SatelliteCaptureTool({
               position={[site.lat, site.lng]}
               icon={
                 showNumbers
-                  ? labelledSiteDivIcon(site.status, site.site_number)
-                  : siteDivIcon(site.status)
+                  ? labelledSiteDivIcon(
+                      site.status,
+                      site.site_number,
+                      site.id === selectedSiteId
+                    )
+                  : siteDivIcon(site.status, site.id === selectedSiteId)
               }
               draggable={!pinsLocked}
               eventHandlers={{
+                click: () => {
+                  setSelectedSiteId(site.id);
+                  setRenamingId(null);
+                  setActionError(null);
+                },
                 dragend: (e) => {
                   const latlng = e.target.getLatLng();
                   handleDragEnd(site.id, latlng.lat, latlng.lng);
                 },
               }}
-            >
-              <Popup>
-                <div className="flex flex-col gap-2 text-sm">
-                  <strong>Site {site.site_number}</strong>
-                  {pinsLocked && (
-                    <button
-                      type="button"
-                      onClick={() => togglePinsLocked(false)}
-                      className="text-left text-neutral-500 underline"
-                    >
-                      Locked — unlock to drag pins
-                    </button>
-                  )}
-                  <label className="flex flex-col gap-1">
-                    Status
-                    <select
-                      value={site.status}
-                      onChange={(e) =>
-                        handleStatusChange(site.id, e.target.value as SiteStatus)
-                      }
-                      className="rounded border border-neutral-300 px-1 py-0.5"
-                    >
-                      <option value="draft">Draft</option>
-                      <option value="active">Active</option>
-                      <option value="inactive">Inactive</option>
-                    </select>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(site.id, site.site_number)}
-                    className="text-left text-red-600 hover:underline"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </Popup>
-            </Marker>
+            />
           ))}
 
           {pending && (
             <Marker
               position={[pending.lat, pending.lng]}
               icon={siteDivIcon("draft", true)}
-              ref={(marker) => {
-                pendingMarkerRef.current = marker;
-              }}
-            >
-              <Popup autoClose={false} closeOnClick={false}>
-                <div className="flex flex-col gap-2 text-sm">
-                  <label className="flex flex-col gap-1">
-                    Site number
-                    <input
-                      autoFocus
-                      value={newSiteNumber}
-                      onChange={(e) => setNewSiteNumber(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleSaveNewSite()}
-                      className="rounded border border-neutral-300 px-1 py-0.5"
-                    />
-                  </label>
-                  {saveError && <p className="text-red-600">{saveError}</p>}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      disabled={isSaving || !newSiteNumber.trim()}
-                      onClick={handleSaveNewSite}
-                      className="rounded bg-neutral-900 px-2 py-1 text-white disabled:opacity-50"
-                    >
-                      {isSaving ? "Saving..." : "Save"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setPending(null);
-                        setSaveError(null);
-                      }}
-                      className="rounded border border-neutral-300 px-2 py-1"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </Popup>
-            </Marker>
+            />
           )}
+
         </MapContainer>
       </div>
     </div>
