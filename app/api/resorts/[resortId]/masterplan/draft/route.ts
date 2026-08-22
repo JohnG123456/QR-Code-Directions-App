@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { draftPayloadSchema } from "@/lib/masterplan/draft-payload";
 
 // Pushes a draft that only exists in this browser up to the account,
 // exactly as it stands.
@@ -17,28 +17,6 @@ import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
-
-// Comfortably above a rendered plan sheet, comfortably below Vercel's
-// request body limit.
-const MAX_IMAGE_CHARS = 8_000_000;
-
-const bodySchema = z.object({
-  fileName: z.string().nullable(),
-  step: z.string().min(1),
-  imageDataUrl: z.string().startsWith("data:image/").max(MAX_IMAGE_CHARS),
-  imageWidth: z.number().int().positive(),
-  imageHeight: z.number().int().positive(),
-  labels: z.array(
-    z.object({ id: z.string(), text: z.string(), x: z.number(), y: z.number() })
-  ),
-  pairs: z.array(
-    z.object({
-      plan: z.object({ x: z.number(), y: z.number() }),
-      world: z.object({ x: z.number(), y: z.number() }),
-    })
-  ),
-  lastImportedAt: z.number().nullable().optional(),
-});
 
 export async function POST(
   request: Request,
@@ -60,7 +38,7 @@ export async function POST(
     return NextResponse.json({ error: "Couldn't read that draft." }, { status: 400 });
   }
 
-  const parsed = bodySchema.safeParse(body);
+  const parsed = draftPayloadSchema.safeParse(body);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return NextResponse.json(
@@ -75,8 +53,8 @@ export async function POST(
       file_name: parsed.data.fileName,
       step: parsed.data.step,
       image_data_url: parsed.data.imageDataUrl,
-      image_width: parsed.data.imageWidth,
-      image_height: parsed.data.imageHeight,
+      image_width: Math.round(parsed.data.imageWidth),
+      image_height: Math.round(parsed.data.imageHeight),
       labels: parsed.data.labels,
       pairs: parsed.data.pairs,
       last_imported_at: parsed.data.lastImportedAt
