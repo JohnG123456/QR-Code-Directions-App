@@ -84,47 +84,51 @@ function PlanOverlayNote({
   reason: "not-migrated" | "no-plan" | "not-calibrated";
   resortId: string;
 }) {
+  // Deliberately quiet, not a warning. The captured sites on the map have
+  // nothing to do with this, and an amber panel saying "no master plan is
+  // saved" above a map covered in pins reads as "your work is missing".
+  const shell =
+    "rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600";
+
   if (reason === "not-migrated") {
     return (
-      <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-        The master plan can&apos;t be shown here yet: the database is missing
-        the table that holds it. Run{" "}
+      <p className={shell}>
+        <strong>Optional backdrop unavailable.</strong> The plan drawing
+        can&apos;t be laid over the imagery yet: the database is missing the
+        table that holds it. Run{" "}
         <code>supabase/migrations/0002_masterplan_drafts.sql</code> in the
-        Supabase SQL editor.
+        Supabase SQL editor. Your captured sites aren&apos;t affected.
       </p>
     );
   }
 
   if (reason === "not-calibrated") {
     return (
-      <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-        A master plan is saved for this resort but was never matched to the
-        map, so there&apos;s nowhere to put it. Add at least two reference
-        points in{" "}
-        <a
-          href={`/admin/resorts/${resortId}/import-masterplan`}
-          className="underline"
-        >
+      <p className={shell}>
+        <strong>Optional backdrop unavailable.</strong> A plan drawing is
+        saved for this resort but was never matched to the map, so there&apos;s
+        nowhere to put it. Add at least two reference points in{" "}
+        <a href={`/admin/resorts/${resortId}/import-masterplan`} className="underline">
           Import from master plan
         </a>
-        .
+        . Your captured sites aren&apos;t affected.
       </p>
     );
   }
 
   return (
-    <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
-      No master plan is saved to your account for this resort, so it
-      can&apos;t be shown over the imagery. Upload it once in{" "}
-      <a
-        href={`/admin/resorts/${resortId}/import-masterplan`}
-        className="underline"
-      >
+    <p className={shell}>
+      <strong>Optional backdrop unavailable.</strong> The plan <em>drawing</em>
+      {" "}
+      isn&apos;t saved to your account, so it can&apos;t be shown underneath
+      these pins. This is only about the drawing — your captured sites are
+      safe. To add it, open{" "}
+      <a href={`/admin/resorts/${resortId}/import-masterplan`} className="underline">
         Import from master plan
-      </a>
-      . If you imported one before drafts moved to the account, it only ever
-      existed in that browser — re-uploading the same PDF is enough, and you
-      don&apos;t have to import the sites again.
+      </a>{" "}
+      and either save the draft already on this device to your account, or
+      upload the PDF once. Either way you don&apos;t have to import the sites
+      again.
     </p>
   );
 }
