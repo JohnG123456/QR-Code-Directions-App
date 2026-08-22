@@ -73,6 +73,7 @@ export function NetworkEditor({
   sites,
   connectors,
   planCalibration,
+  planUnavailable,
   addGraphNode,
   addGraphEdge,
   moveGraphNode,
@@ -96,6 +97,8 @@ export function NetworkEditor({
     imageHeight: number;
     fileName: string | null;
   } | null;
+  /** Why there's no overlay to offer, when there isn't. */
+  planUnavailable: "not-migrated" | "no-plan" | "not-calibrated" | null;
   addGraphNode: (input: {
     resortId: string;
     lat: number;
@@ -365,10 +368,36 @@ export function NetworkEditor({
         <p className="text-xs text-neutral-500">Loading the master plan image…</p>
       )}
       {!georeference && (
-        <p className="rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
-          The master plan can&apos;t be shown as a backdrop yet — it needs at
-          least two calibration points from the master plan import. Satellite
-          imagery still works for streets that have been built.
+        <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          {planUnavailable === "not-migrated" ? (
+            <>
+              The master plan backdrop needs a database table that isn&apos;t
+              there yet — run{" "}
+              <code>supabase/migrations/0002_masterplan_drafts.sql</code> in the
+              Supabase SQL editor.
+            </>
+          ) : planUnavailable === "not-calibrated" ? (
+            <>
+              A master plan is saved for this resort but was never matched to
+              the map, so there&apos;s nowhere to put it. Add at least two
+              reference points in{" "}
+              <a href={`/admin/resorts/${resortId}/import-masterplan`} className="underline">
+                Import from master plan
+              </a>
+              .
+            </>
+          ) : (
+            <>
+              No master plan is saved to your account for this resort. Upload it
+              once in{" "}
+              <a href={`/admin/resorts/${resortId}/import-masterplan`} className="underline">
+                Import from master plan
+              </a>
+              ; if you imported one before drafts moved to the account, it only
+              ever existed in that browser.
+            </>
+          )}{" "}
+          Satellite imagery still works for streets that have been built.
         </p>
       )}
       {error && <p className="text-sm text-red-600">{error}</p>}

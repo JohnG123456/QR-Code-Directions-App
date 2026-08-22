@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { fetchRemoteDraftSummary } from "@/lib/masterplan/remote-draft";
+import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
 import { NetworkEditorClient } from "./network-editor-client";
 import { ConnectSitesPanel } from "@/components/admin/network/connect-sites-panel";
 import {
@@ -39,7 +39,7 @@ export default async function NetworkPage({
 
   if (!resort) notFound();
 
-  const [{ data: nodes }, { data: edges }, { data: sites }, draft] = await Promise.all([
+  const [{ data: nodes }, { data: edges }, { data: sites }, planOverlay] = await Promise.all([
     supabase
       .from("graph_nodes")
       .select("id, lat, lng, node_type")
@@ -57,7 +57,7 @@ export default async function NetworkPage({
     // be shown in its real-world position. Only the reference points are
     // needed here - the image itself is fetched on demand, since it's a
     // couple of MB and most visits don't need it.
-    fetchRemoteDraftSummary(supabase, resortId),
+    describePlanOverlay(supabase, resortId),
   ]);
 
   if (resort.center_lat === null || resort.center_lng === null) {
@@ -142,15 +142,16 @@ export default async function NetworkPage({
             s.lat !== null && s.lng !== null
         )}
         planCalibration={
-          draft && draft.pairs.length >= 2
+          planOverlay.kind === "ready"
             ? {
-                pairs: draft.pairs,
-                imageWidth: draft.imageWidth,
-                imageHeight: draft.imageHeight,
-                fileName: draft.fileName,
+                pairs: planOverlay.summary.pairs,
+                imageWidth: planOverlay.summary.imageWidth,
+                imageHeight: planOverlay.summary.imageHeight,
+                fileName: planOverlay.summary.fileName,
               }
             : null
         }
+        planUnavailable={planOverlay.kind === "ready" ? null : planOverlay.kind}
         addGraphNode={addGraphNode}
         addGraphEdge={addGraphEdge}
         moveGraphNode={moveGraphNode}

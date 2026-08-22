@@ -112,3 +112,63 @@ export async function fetchRemoteDraft(
   if (error || !data) return null;
   return rowToDraft(data as DraftRow);
 }
+
+// Why the master plan can't be shown as an overlay, when it can't.
+//
+// The tools used to just hide the toggle if anything was missing, which
+// left no way to tell "you haven't uploaded a plan" from "the migration
+// hasn't been run" from "this plan was never calibrated" - the control
+// simply wasn't there, with nothing to explain it.
+export type PlanOverlayAvailability =
+  | { kind: "ready"; summary: RemoteDraftSummary }
+  /** The masterplan_drafts table doesn't exist yet. */
+  | { kind: "not-migrated" }
+  /** No plan has been uploaded for this resort since drafts moved to the
+   *  account - including a plan imported before that, which only ever
+   *  existed in one browser. */
+  | { kind: "no-plan" }
+  /** A plan is saved, but without the two reference points that place it
+   *  on the map. */
+  | { kind: "not-calibrated" };
+
+const MISSING_TABLE_CODES = new Set([
+  "42P01", // Postgres: undefined_table
+  "PGRST205", // PostgREST: table not found in the schema cache
+]);
+
+export async function describePlanOverlay(
+  supabase: SupabaseClient,
+  resortId: string
+): Promise<PlanOverlayAvailability> {
+  const { data, error } = await supabase
+    .from("masterplan_drafts")
+    .select(
+      "resort_id, file_name, step, image_width, image_height, labels, pairs, last_imported_at, updated_at"
+    )
+    .eq("resort_id", resortId)
+    .maybeSingle();
+
+  if (error) {
+    return MISSING_TABLE_CODES.has(error.code) ? { kind: "not-migrated" } : { kind: "no-plan" };
+  }
+  if (!data) return { kind: "no-plan" };
+
+  const draft = rowToDraft({ ...(data as Omit<DraftRow, "image_data_url">), image_data_url: "-" });
+  if (!draft) return { kind: "no-plan" };
+  if (draft.pairs.length < 2) return { kind: "not-calibrated" };
+
+  return {
+    kind: "ready",
+    summary: {
+      resortId: draft.resortId,
+      fileName: draft.fileName,
+      savedAt: draft.savedAt,
+      lastImportedAt: draft.lastImportedAt,
+      step: draft.step,
+      imageWidth: draft.imageWidth,
+      imageHeight: draft.imageHeight,
+      labels: draft.labels,
+      pairs: draft.pairs,
+    },
+  };
+}
