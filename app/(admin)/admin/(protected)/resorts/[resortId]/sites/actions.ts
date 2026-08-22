@@ -159,6 +159,56 @@ export async function bulkUpsertSites(
   return { inserted: count ?? uniqueRows.length, errors, warnings };
 }
 
+const restoreSiteSchema = z.object({
+  resortId: z.string().uuid(),
+  siteNumber: z.string().trim().min(1),
+  label: z.string().nullable(),
+  status: z.enum(["active", "inactive", "draft"]),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+// Puts back a site that was just deleted, for Undo. Unlike addSite this
+// restores the label and status it had, so undoing a deletion actually
+// returns things to how they were rather than leaving a bare draft pin.
+//
+// The row gets a new id - the old one is gone for good - which is why the
+// map replaces its copy with what comes back.
+export async function restoreSite(
+  input: z.infer<typeof restoreSiteSchema>
+): Promise<ActionState> {
+  const parsed = restoreSiteSchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("sites")
+    .insert({
+      resort_id: parsed.data.resortId,
+      site_number: parsed.data.siteNumber,
+      label: parsed.data.label,
+      status: parsed.data.status,
+      location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})`,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return {
+      error:
+        error.code === "23505"
+          ? `Site ${parsed.data.siteNumber} already exists again — nothing to undo.`
+          : error.message,
+    };
+  }
+
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-map`);
+  return { success: true, siteId: data.id };
+}
+
 const setSiteStatusSchema = z.object({
   siteId: z.string().uuid(),
   resortId: z.string().uuid(),

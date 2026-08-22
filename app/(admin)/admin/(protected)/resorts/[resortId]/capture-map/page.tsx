@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { fetchRemoteDraftSummary } from "@/lib/masterplan/remote-draft";
-import { addSite, updateSiteLocation, deleteSite, setSiteStatus } from "../sites/actions";
+import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
+import {
+  addSite,
+  updateSiteLocation,
+  deleteSite,
+  restoreSite,
+  setSiteStatus,
+} from "../sites/actions";
 import { CaptureMapClient } from "./capture-map-client";
 
 export default async function CaptureMapPage({
@@ -21,7 +27,7 @@ export default async function CaptureMapPage({
 
   if (!resort) notFound();
 
-  const [{ data: sites }, draft] = await Promise.all([
+  const [{ data: sites }, planOverlay] = await Promise.all([
     supabase
       .from("sites")
       .select("id, site_number, label, lat, lng, status")
@@ -29,7 +35,7 @@ export default async function CaptureMapPage({
       .order("site_number"),
     // Only the calibration is needed here; the plan image itself is
     // fetched by the tool if staff actually switch the overlay on.
-    fetchRemoteDraftSummary(supabase, resortId),
+    describePlanOverlay(supabase, resortId),
   ]);
 
   return (
@@ -57,17 +63,19 @@ export default async function CaptureMapPage({
         centerLng={resort.center_lng}
         defaultZoom={resort.default_zoom}
         planCalibration={
-          draft && draft.pairs.length >= 2
+          planOverlay.kind === "ready"
             ? {
-                pairs: draft.pairs,
-                imageWidth: draft.imageWidth,
-                imageHeight: draft.imageHeight,
+                pairs: planOverlay.summary.pairs,
+                imageWidth: planOverlay.summary.imageWidth,
+                imageHeight: planOverlay.summary.imageHeight,
               }
             : null
         }
+        planUnavailable={planOverlay.kind === "ready" ? null : planOverlay.kind}
         addSite={addSite}
         updateSiteLocation={updateSiteLocation}
         deleteSite={deleteSite}
+        restoreSite={restoreSite}
         setSiteStatus={setSiteStatus}
       />
     </div>

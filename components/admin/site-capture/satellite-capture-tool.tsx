@@ -29,6 +29,37 @@ interface PendingPin {
   lng: number;
 }
 
+// One step of history, holding whatever is needed to put things back.
+//
+// Pins are draggable so positions can be corrected, which means a pinch
+// to zoom that lands slightly off nudges a house across the map instead -
+// easy to do on a phone, and easy not to notice until much later.
+type UndoEntry =
+  | { kind: "move"; siteId: string; siteNumber: string; lat: number; lng: number }
+  | { kind: "add"; siteId: string; siteNumber: string }
+  | { kind: "delete"; site: CapturedSite }
+  | { kind: "status"; siteId: string; siteNumber: string; status: SiteStatus };
+
+const UNDO_LIMIT = 25;
+
+/** Which site a step refers to, whatever kind of step it is. */
+function undoTarget(entry: UndoEntry): string {
+  return entry.kind === "delete" ? entry.site.id : entry.siteId;
+}
+
+function describeUndo(entry: UndoEntry): string {
+  switch (entry.kind) {
+    case "move":
+      return `move of ${entry.siteNumber}`;
+    case "add":
+      return `adding ${entry.siteNumber}`;
+    case "delete":
+      return `deleting ${entry.site.site_number}`;
+    case "status":
+      return `status of ${entry.siteNumber}`;
+  }
+}
+
 // Drops a pin where the map is tapped - but not when the tap was really
 // aimed at a popup.
 //
@@ -42,6 +73,61 @@ interface PendingPin {
 // devices), so by the time it fires, the save has finished, React has
 // unmounted the popup, and the event's target is an orphaned element
 // whose ancestors no longer say it was ever in a popup.
+// Says why the master plan can't be laid over the imagery. Hiding the
+// control and saying nothing left no way to tell an un-run migration from
+// a plan that was never uploaded.
+function PlanOverlayNote({
+  reason,
+  resortId,
+}: {
+  reason: "not-migrated" | "no-plan" | "not-calibrated";
+  resortId: string;
+}) {
+  if (reason === "not-migrated") {
+    return (
+      <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        The master plan can&apos;t be shown here yet: the database is missing
+        the table that holds it. Run{" "}
+        <code>supabase/migrations/0002_masterplan_drafts.sql</code> in the
+        Supabase SQL editor.
+      </p>
+    );
+  }
+
+  if (reason === "not-calibrated") {
+    return (
+      <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        A master plan is saved for this resort but was never matched to the
+        map, so there&apos;s nowhere to put it. Add at least two reference
+        points in{" "}
+        <a
+          href={`/admin/resorts/${resortId}/import-masterplan`}
+          className="underline"
+        >
+          Import from master plan
+        </a>
+        .
+      </p>
+    );
+  }
+
+  return (
+    <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
+      No master plan is saved to your account for this resort, so it
+      can&apos;t be shown over the imagery. Upload it once in{" "}
+      <a
+        href={`/admin/resorts/${resortId}/import-masterplan`}
+        className="underline"
+      >
+        Import from master plan
+      </a>
+      . If you imported one before drafts moved to the account, it only ever
+      existed in that browser — re-uploading the same PDF is enough, and you
+      don&apos;t have to import the sites again.
+    </p>
+  );
+}
+
 function ClickToAdd({ onPick }: { onPick: (lat: number, lng: number) => void }) {
   const swallowNextClick = useRef(false);
 
@@ -107,9 +193,11 @@ export function SatelliteCaptureTool({
   centerLng,
   defaultZoom,
   planCalibration,
+  planUnavailable,
   addSite,
   updateSiteLocation,
   deleteSite,
+  restoreSite,
   setSiteStatus,
 }: {
   resortId: string;
@@ -123,9 +211,19 @@ export function SatelliteCaptureTool({
     imageWidth: number;
     imageHeight: number;
   } | null;
+  /** Why there's no overlay to offer, when there isn't. */
+  planUnavailable: "not-migrated" | "no-plan" | "not-calibrated" | null;
   addSite: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   updateSiteLocation: (prevState: ActionState, formData: FormData) => Promise<ActionState>;
   deleteSite: (formData: FormData) => Promise<void>;
+  restoreSite: (input: {
+    resortId: string;
+    siteNumber: string;
+    label: string | null;
+    status: SiteStatus;
+    lat: number;
+    lng: number;
+  }) => Promise<ActionState>;
   setSiteStatus: (formData: FormData) => Promise<void>;
 }) {
   const [sites, setSites] = useState<CapturedSite[]>(initialSites);
@@ -138,6 +236,8 @@ export function SatelliteCaptureTool({
   const [showMissing, setShowMissing] = useState(false);
   const [siteNumberToPlace, setSiteNumberToPlace] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
+  const [isUndoing, setIsUndoing] = useState(false);
   const [showPlan, setShowPlan] = useState(false);
   const [planOpacity, setPlanOpacity] = useState(0.6);
   const [planImage, setPlanImage] = useState<string | null>(null);
@@ -229,13 +329,23 @@ export function SatelliteCaptureTool({
         status: "draft",
       },
     ]);
+    pushUndo({
+      kind: "add",
+      siteId: result.siteId,
+      siteNumber: newSiteNumber.trim(),
+    });
     setPending(null);
     setNewSiteNumber("");
     setSiteNumberToPlace(null);
   }
 
+  function pushUndo(entry: UndoEntry) {
+    setUndoStack((prev) => [...prev, entry].slice(-UNDO_LIMIT));
+  }
+
   async function handleDragEnd(siteId: string, lat: number, lng: number) {
     const previous = sites;
+    const before = previous.find((s) => s.id === siteId);
     setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, lat, lng } : s)));
 
     const formData = new FormData();
@@ -250,12 +360,23 @@ export function SatelliteCaptureTool({
       // back with no explanation looks like the map is broken.
       setSites(previous);
       setActionError(result.error);
+      return;
+    }
+    if (before) {
+      pushUndo({
+        kind: "move",
+        siteId,
+        siteNumber: before.site_number,
+        lat: before.lat,
+        lng: before.lng,
+      });
     }
   }
 
   async function handleDelete(siteId: string, siteNumber: string) {
     if (!confirm(`Delete site ${siteNumber}? The pin and the site both go.`)) return;
     const previous = sites;
+    const removed = previous.find((s) => s.id === siteId);
     setActionError(null);
     setSites((prev) => prev.filter((s) => s.id !== siteId));
 
@@ -264,6 +385,7 @@ export function SatelliteCaptureTool({
     formData.set("resortId", resortId);
     try {
       await deleteSite(formData);
+      if (removed) pushUndo({ kind: "delete", site: removed });
     } catch {
       setSites(previous);
       setActionError(`Site ${siteNumber} couldn't be deleted — it's still there.`);
@@ -272,6 +394,7 @@ export function SatelliteCaptureTool({
 
   async function handleStatusChange(siteId: string, status: SiteStatus) {
     const previous = sites;
+    const before = previous.find((s) => s.id === siteId);
     setSites((prev) => prev.map((s) => (s.id === siteId ? { ...s, status } : s)));
 
     const formData = new FormData();
@@ -280,9 +403,102 @@ export function SatelliteCaptureTool({
     formData.set("status", status);
     try {
       await setSiteStatus(formData);
+      if (before) {
+        pushUndo({
+          kind: "status",
+          siteId,
+          siteNumber: before.site_number,
+          status: before.status,
+        });
+      }
     } catch {
       setSites(previous);
       setActionError("That status change didn't save.");
+    }
+  }
+
+  // Reverses the last change. Each step is undone against the database
+  // too, not just on screen - the point is to put right something that
+  // was already saved.
+  async function handleUndo() {
+    const entry = undoStack[undoStack.length - 1];
+    if (!entry) return;
+
+    setIsUndoing(true);
+    setActionError(null);
+    setUndoStack((prev) => prev.slice(0, -1));
+
+    // Undo failures put the step back on the stack: better to be able to
+    // try again than to lose the only record of what happened.
+    const failed = (message: string) => {
+      setActionError(message);
+      setUndoStack((prev) => [...prev, entry]);
+    };
+
+    try {
+      if (entry.kind === "move") {
+        const formData = new FormData();
+        formData.set("siteId", entry.siteId);
+        formData.set("resortId", resortId);
+        formData.set("lat", String(entry.lat));
+        formData.set("lng", String(entry.lng));
+        const result = await updateSiteLocation({}, formData);
+        if (result.error) {
+          failed(result.error);
+        } else {
+          setSites((prev) =>
+            prev.map((s) =>
+              s.id === entry.siteId ? { ...s, lat: entry.lat, lng: entry.lng } : s
+            )
+          );
+        }
+      } else if (entry.kind === "add") {
+        const formData = new FormData();
+        formData.set("siteId", entry.siteId);
+        formData.set("resortId", resortId);
+        await deleteSite(formData);
+        setSites((prev) => prev.filter((s) => s.id !== entry.siteId));
+        // Anything earlier in the history about a row that no longer
+        // exists can never be undone, so drop it rather than leave a step
+        // that fails every time it's reached.
+        setUndoStack((prev) => prev.filter((e) => undoTarget(e) !== entry.siteId));
+      } else if (entry.kind === "delete") {
+        const result = await restoreSite({
+          resortId,
+          siteNumber: entry.site.site_number,
+          label: entry.site.label,
+          status: entry.site.status,
+          lat: entry.site.lat,
+          lng: entry.site.lng,
+        });
+        if (result.error || !result.siteId) {
+          failed(result.error ?? "Couldn't put that site back.");
+        } else {
+          // A restored row is a new row, so the map takes the new id -
+          // and so does any earlier step in the history that referred to
+          // the old one, which would otherwise fail on a row that's gone.
+          const newId = result.siteId;
+          setSites((prev) => [...prev, { ...entry.site, id: newId }]);
+          setUndoStack((prev) =>
+            prev.map((e) =>
+              e.kind !== "delete" && e.siteId === entry.site.id ? { ...e, siteId: newId } : e
+            )
+          );
+        }
+      } else {
+        const formData = new FormData();
+        formData.set("siteId", entry.siteId);
+        formData.set("resortId", resortId);
+        formData.set("status", entry.status);
+        await setSiteStatus(formData);
+        setSites((prev) =>
+          prev.map((s) => (s.id === entry.siteId ? { ...s, status: entry.status } : s))
+        );
+      }
+    } catch {
+      failed("That couldn't be undone — check your connection and try again.");
+    } finally {
+      setIsUndoing(false);
     }
   }
 
@@ -319,7 +535,7 @@ export function SatelliteCaptureTool({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <input
             type="text"
             placeholder="Jump to site #"
@@ -331,7 +547,7 @@ export function SatelliteCaptureTool({
           <button
             type="button"
             onClick={handleSearch}
-            className="rounded-md border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50"
+            className="shrink-0 whitespace-nowrap rounded-md border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50"
           >
             Go
           </button>
@@ -344,9 +560,21 @@ export function SatelliteCaptureTool({
                 { padding: [50, 50] }
               )
             }
-            className="rounded-md border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50"
+            className="shrink-0 whitespace-nowrap rounded-md border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50"
           >
             Fit to all sites
+          </button>
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={undoStack.length === 0 || isUndoing}
+            className="shrink-0 whitespace-nowrap rounded-md border border-neutral-300 px-2 py-1 text-sm hover:bg-neutral-50 disabled:opacity-40"
+          >
+            {isUndoing
+              ? "Undoing…"
+              : undoStack.length > 0
+                ? `Undo ${describeUndo(undoStack[undoStack.length - 1])}`
+                : "Undo"}
           </button>
           <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm">
             <input
@@ -386,6 +614,8 @@ export function SatelliteCaptureTool({
       {planLoading && (
         <p className="text-xs text-neutral-500">Loading the master plan image…</p>
       )}
+
+      {planUnavailable && <PlanOverlayNote reason={planUnavailable} resortId={resortId} />}
 
       {actionError && (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>
