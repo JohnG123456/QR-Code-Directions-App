@@ -981,8 +981,13 @@ export function MasterplanImportTool({
             <>
               <p className="text-sm text-green-700">
                 Imported/updated {importResult.inserted} sites as drafts.
-                Review and activate them from the Sites list, or fine-tune
-                positions in the satellite capture tool.
+              </p>
+              <p className="text-sm text-neutral-700">
+                <strong>The import is done — carry on in the satellite
+                capture tool.</strong> That&apos;s where numbers get corrected,
+                pins moved, missing ones added and phantoms deleted, with the
+                master plan laid over the imagery. There is no need to come
+                back here unless the plan itself is revised.
               </p>
               <p className="text-sm text-neutral-600">
                 Your reviewed site numbers and calibration are still saved on

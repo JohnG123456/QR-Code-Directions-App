@@ -5,6 +5,7 @@ import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
 import {
   addSite,
   updateSiteLocation,
+  updateSiteDetails,
   deleteSite,
   restoreSite,
   setSiteStatus,
@@ -74,6 +75,7 @@ export default async function CaptureMapPage({
         planUnavailable={planOverlay.kind === "ready" ? null : planOverlay.kind}
         addSite={addSite}
         updateSiteLocation={updateSiteLocation}
+        updateSiteDetails={updateSiteDetails}
         deleteSite={deleteSite}
         restoreSite={restoreSite}
         setSiteStatus={setSiteStatus}

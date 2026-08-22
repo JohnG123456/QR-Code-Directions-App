@@ -1,6 +1,35 @@
 import L from "leaflet";
 import type { SiteStatus } from "@/lib/types";
 
+// Icons are cached and shared between markers, and that is load-bearing,
+// not an optimisation.
+//
+// react-leaflet re-applies a Marker's icon whenever the prop's identity
+// changes, and Leaflet's setIcon rebuilds the marker's DOM element -
+// which closes any popup that was open on it. Building a fresh divIcon on
+// every render therefore made a popup shut the instant anything in the
+// page re-rendered, so a control inside a popup could never be used: the
+// first tap closed the thing it was in.
+//
+// A divIcon is a stateless description of how to draw a marker, so one
+// instance is safe to share; keying the cache on everything that affects
+// the drawing keeps them correct.
+const iconCache = new Map<string, L.DivIcon>();
+
+// A resort has a few hundred sites and three statuses, so the cache
+// settles at a small size. The cap is only there so that a long session
+// of renaming can't grow it without bound.
+const ICON_CACHE_LIMIT = 4000;
+
+function cachedIcon(key: string, build: () => L.DivIcon): L.DivIcon {
+  const existing = iconCache.get(key);
+  if (existing) return existing;
+  if (iconCache.size >= ICON_CACHE_LIMIT) iconCache.clear();
+  const icon = build();
+  iconCache.set(key, icon);
+  return icon;
+}
+
 const STATUS_COLOR: Record<SiteStatus, string> = {
   draft: "#d97706", // amber - captured but not yet reviewed
   active: "#15803d", // green - live/published
@@ -14,6 +43,16 @@ export function labelledSiteDivIcon(
   status: SiteStatus,
   siteNumber: string,
   highlighted = false
+) {
+  return cachedIcon(`labelled|${status}|${siteNumber}|${highlighted}`, () =>
+    buildLabelledSiteDivIcon(status, siteNumber, highlighted)
+  );
+}
+
+function buildLabelledSiteDivIcon(
+  status: SiteStatus,
+  siteNumber: string,
+  highlighted: boolean
 ) {
   const color = STATUS_COLOR[status];
   const size = highlighted ? 22 : 14;
@@ -44,6 +83,12 @@ export function labelledSiteDivIcon(
 }
 
 export function siteDivIcon(status: SiteStatus, highlighted = false) {
+  return cachedIcon(`plain|${status}|${highlighted}`, () =>
+    buildSiteDivIcon(status, highlighted)
+  );
+}
+
+function buildSiteDivIcon(status: SiteStatus, highlighted: boolean) {
   const color = STATUS_COLOR[status];
   const size = highlighted ? 22 : 16;
   return L.divIcon({
@@ -70,6 +115,10 @@ export function siteDivIcon(status: SiteStatus, highlighted = false) {
 // slow or blocked shouldn't leave them with a line and no idea which end
 // is their house. It also lets the pins say what they are.
 export function routeEndpointIcon(kind: "entrance" | "site", label: string) {
+  return cachedIcon(`route|${kind}|${label}`, () => buildRouteEndpointIcon(kind, label));
+}
+
+function buildRouteEndpointIcon(kind: "entrance" | "site", label: string) {
   const color = kind === "entrance" ? "#7c3aed" : "#15803d";
   const safeLabel = label.replace(/[<>&"]/g, "");
   return L.divIcon({

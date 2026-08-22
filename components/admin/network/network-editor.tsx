@@ -47,7 +47,21 @@ interface SiteMarker {
 
 type Mode = "draw" | "edit";
 
+// Cached for the same reason as the site icons: a new icon object on
+// every render makes Leaflet rebuild the marker, which closes any popup
+// open on it. See lib/map/site-icon.ts.
+const nodeIconCache = new Map<string, L.DivIcon>();
+
 function nodeIcon(isEntrance: boolean, isSelected: boolean, isChainHead: boolean) {
+  const key = `${isEntrance}|${isSelected}|${isChainHead}`;
+  const cached = nodeIconCache.get(key);
+  if (cached) return cached;
+  const icon = buildNodeIcon(isEntrance, isSelected, isChainHead);
+  nodeIconCache.set(key, icon);
+  return icon;
+}
+
+function buildNodeIcon(isEntrance: boolean, isSelected: boolean, isChainHead: boolean) {
   const size = isEntrance || isSelected || isChainHead ? 16 : 11;
   const color = isEntrance ? "#7c3aed" : isChainHead ? "#2563eb" : "#111827";
   return L.divIcon({

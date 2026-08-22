@@ -14,6 +14,12 @@ export interface MissingSiteNumbers {
   /** Captured numbers that aren't plain integers, e.g. "42A" - reported so
    *  staff know they were left out of the gap analysis rather than missed. */
   ignored: string[];
+  /** Captured numbers above the resort's stated total. Extracting numbers
+   *  off a drawing picks up stage numbers, drawing references and misread
+   *  digits, and they arrive looking exactly like site numbers. They're
+   *  the other half of the cross-check: if the total is right, every one
+   *  of these is either a typo for a missing number or isn't a site. */
+  unexpected: string[];
 }
 
 const PLAIN_INTEGER = /^\d+$/;
@@ -37,7 +43,7 @@ export function findMissingSiteNumbers(
   }
 
   if (numeric.length === 0) {
-    return { missing: [], upTo: 0, ignored };
+    return { missing: [], upTo: 0, ignored, unexpected: [] };
   }
 
   // Match the padding staff are actually using ("042" not "42"), taking the
@@ -52,7 +58,12 @@ export function findMissingSiteNumbers(
   // the range already captured, since we can't know where the numbering
   // ends and would otherwise invent a pile of non-existent sites.
   const highestCaptured = Math.max(...numeric);
-  const upTo = totalHomes && totalHomes > 0 ? Math.max(totalHomes, highestCaptured) : highestCaptured;
+  // With a stated total, the gaps run 1..total and stop there. Stretching
+  // the range up to the highest captured number instead meant one misread
+  // "777" at a 244-home resort reported 772 numbers as outstanding, which
+  // buries the handful that genuinely are. Anything above the total is
+  // reported separately, as suspect rather than missing.
+  const upTo = totalHomes && totalHomes > 0 ? totalHomes : highestCaptured;
   const lowest = totalHomes && totalHomes > 0 ? 1 : Math.min(...numeric);
 
   const present = new Set(numeric);
@@ -61,7 +72,15 @@ export function findMissingSiteNumbers(
     if (!present.has(n)) missing.push(String(n).padStart(padWidth, "0"));
   }
 
-  return { missing, upTo, ignored };
+  const unexpected =
+    totalHomes && totalHomes > 0
+      ? captured
+          .map((raw) => raw.trim())
+          .filter((value) => PLAIN_INTEGER.test(value) && parseInt(value, 10) > totalHomes)
+          .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+      : [];
+
+  return { missing, upTo, ignored, unexpected };
 }
 
 // Collapses a run of consecutive numbers into "004-009" so a long gap list
