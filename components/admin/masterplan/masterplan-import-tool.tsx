@@ -96,6 +96,12 @@ export function MasterplanImportTool({
   const [localSaveFailed, setLocalSaveFailed] = useState(false);
   const [remoteSaveFailed, setRemoteSaveFailed] = useState(false);
   const [remoteSaveError, setRemoteSaveError] = useState<string | null>(null);
+  // True when this browser has a draft and the account has none - the
+  // state someone lands in if they reviewed a plan before drafts were
+  // kept on the server, or if the upload that should have created the
+  // server copy failed.
+  const [accountCopyMissing, setAccountCopyMissing] = useState(false);
+  const [uploadingToAccount, setUploadingToAccount] = useState(false);
 
   // Offer to pick up an unfinished review from a previous sitting - from
   // this browser or from the account, whichever was saved more recently.
@@ -112,6 +118,7 @@ export function MasterplanImportTool({
         .filter((d): d is DraftPreview => d !== null)
         .sort((a, b) => b.savedAt - a.savedAt)[0];
       if (newest) setFoundDraft(newest);
+      setAccountCopyMissing(local !== null && remote === null);
     });
     return () => {
       cancelled = true;
@@ -173,6 +180,56 @@ export function MasterplanImportTool({
   }
   const reference = { lat: centerLat, lng: centerLng };
   const selectedLabel = labels.find((l) => l.id === selectedLabelId) ?? null;
+
+  // Sends the draft as it stands to the account, image and all. The
+  // alternative on offer was re-uploading the PDF, which re-scans the
+  // sheet and discards the reviewed numbers and calibration - the very
+  // work worth protecting.
+  async function saveDraftToAccount(draft: {
+    fileName: string | null;
+    step: string;
+    imageDataUrl: string;
+    imageWidth: number;
+    imageHeight: number;
+    labels: ExtractedLabel[];
+    pairs: PointPair[];
+    lastImportedAt?: number | null;
+  }) {
+    setUploadingToAccount(true);
+    setRemoteSaveError(null);
+    try {
+      const response = await fetch(`/api/resorts/${resortId}/masterplan/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fileName: draft.fileName,
+          step: draft.step,
+          imageDataUrl: draft.imageDataUrl,
+          imageWidth: draft.imageWidth,
+          imageHeight: draft.imageHeight,
+          labels: draft.labels,
+          pairs: draft.pairs,
+          lastImportedAt: draft.lastImportedAt ?? null,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        setRemoteSaveError(result.error ?? "That didn't save to your account.");
+        setRemoteSaveFailed(true);
+        return false;
+      }
+      setAccountCopyMissing(false);
+      setRemoteSaveFailed(false);
+      setDraftSavedAt(Date.now());
+      return true;
+    } catch {
+      setRemoteSaveError("Couldn't reach the server.");
+      setRemoteSaveFailed(true);
+      return false;
+    } finally {
+      setUploadingToAccount(false);
+    }
+  }
 
   async function resumeDraft() {
     if (!foundDraft) return;
@@ -426,6 +483,28 @@ export function MasterplanImportTool({
         </p>
       )}
 
+      {plan && remoteSaveFailed && (
+        <button
+          type="button"
+          disabled={uploadingToAccount}
+          onClick={() =>
+            void saveDraftToAccount({
+              fileName: fileNameRef.current,
+              step,
+              imageDataUrl: plan.imageDataUrl,
+              imageWidth: plan.imageWidth,
+              imageHeight: plan.imageHeight,
+              labels,
+              pairs,
+              lastImportedAt,
+            })
+          }
+          className="w-fit rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+        >
+          {uploadingToAccount ? "Saving…" : "Save this draft to my account now"}
+        </button>
+      )}
+
       {plan && !remoteSaveFailed && draftSavedAt && step !== "done" && (
         <p className="text-xs text-neutral-500">
           Progress saved to your account {describeSavedAt(draftSavedAt)} — you
@@ -473,6 +552,39 @@ export function MasterplanImportTool({
             </button>
           </div>
           {resumeError && <p className="text-sm text-red-700">{resumeError}</p>}
+
+          {accountCopyMissing && foundDraft.imageDataUrl && (
+            <div className="flex flex-col gap-2 rounded-md bg-white/70 p-3">
+              <p className="text-sm text-blue-900">
+                This draft is only on this device. Saving it to your account
+                keeps it if this browser is cleared, makes it available on your
+                other devices, and lets the plan be shown over the satellite
+                map and the road network.
+              </p>
+              <button
+                type="button"
+                disabled={uploadingToAccount}
+                onClick={() =>
+                  void saveDraftToAccount({
+                    fileName: foundDraft.fileName,
+                    step: foundDraft.step,
+                    imageDataUrl: foundDraft.imageDataUrl!,
+                    imageWidth: foundDraft.imageWidth,
+                    imageHeight: foundDraft.imageHeight,
+                    labels: foundDraft.labels,
+                    pairs: foundDraft.pairs,
+                    lastImportedAt: foundDraft.lastImportedAt,
+                  })
+                }
+                className="w-fit rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {uploadingToAccount ? "Saving…" : "Save this draft to my account"}
+              </button>
+              {remoteSaveError && (
+                <p className="text-sm text-red-700">{remoteSaveError}</p>
+              )}
+            </div>
+          )}
         </div>
       )}
 
