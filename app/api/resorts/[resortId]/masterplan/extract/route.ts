@@ -65,6 +65,10 @@ export async function POST(
     return NextResponse.json({
       ...plan,
       draftSaved: !draftError,
+      // Passed through so the tool can show the real reason. Reading
+      // "check your connection" when the actual problem is a missing
+      // table sends you looking in entirely the wrong place.
+      draftError: draftError?.message ?? null,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Couldn't process that PDF.";

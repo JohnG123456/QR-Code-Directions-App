@@ -95,6 +95,7 @@ export function MasterplanImportTool({
   // be wrong. Only losing both is worth a red warning.
   const [localSaveFailed, setLocalSaveFailed] = useState(false);
   const [remoteSaveFailed, setRemoteSaveFailed] = useState(false);
+  const [remoteSaveError, setRemoteSaveError] = useState<string | null>(null);
 
   // Offer to pick up an unfinished review from a previous sitting - from
   // this browser or from the account, whichever was saved more recently.
@@ -148,11 +149,15 @@ export function MasterplanImportTool({
         pairs,
         lastImportedAt,
       })
-        .then((ok) => {
-          setRemoteSaveFailed(!ok);
-          if (ok) setDraftSavedAt(savedAt);
+        .then((outcome) => {
+          setRemoteSaveFailed(!outcome.ok);
+          setRemoteSaveError(outcome.error ?? null);
+          if (outcome.ok) setDraftSavedAt(savedAt);
         })
-        .catch(() => setRemoteSaveFailed(true));
+        .catch((err) => {
+          setRemoteSaveFailed(true);
+          setRemoteSaveError(err instanceof Error ? err.message : null);
+        });
     }, 1200);
     return () => clearTimeout(timer);
   }, [resortId, plan, labels, pairs, step, lastImportedAt]);
@@ -253,6 +258,7 @@ export function MasterplanImportTool({
       setPairs([]);
       setLastImportedAt(null);
       setRemoteSaveFailed(result.draftSaved === false);
+      setRemoteSaveError(result.draftError ?? null);
       setStep("review");
     } catch (err) {
       setParseError(err instanceof Error ? err.message : "Couldn't read that PDF.");
@@ -377,10 +383,14 @@ export function MasterplanImportTool({
           labels,
           pairs,
           lastImportedAt: importedAt,
-        }).catch(() => false),
+        }).catch((err) => ({
+          ok: false,
+          error: err instanceof Error ? err.message : undefined,
+        })),
       ]);
       setLocalSaveFailed(!localOk);
-      setRemoteSaveFailed(!remoteOk);
+      setRemoteSaveFailed(!remoteOk.ok);
+      setRemoteSaveError(remoteOk.error ?? null);
     }
   }
 
@@ -393,17 +403,26 @@ export function MasterplanImportTool({
       {plan && localSaveFailed && remoteSaveFailed && (
         <p className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-800">
           <strong>Progress is not being saved.</strong> Neither this browser
-          nor your account is accepting the draft — you may be offline, or in
-          private browsing with storage blocked. Finish and import in this
+          nor your account is accepting the draft. Finish and import in this
           sitting, or your review will be lost when you close the page.
+          {remoteSaveError ? ` The server said: ${remoteSaveError}` : ""}
         </p>
       )}
 
       {plan && remoteSaveFailed && !localSaveFailed && (
         <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          <strong>Saved on this device only.</strong> Your account copy
-          isn&apos;t updating (likely no connection), so this draft won&apos;t
-          be there on another device until the connection comes back.
+          <strong>Saved on this device only.</strong> This draft isn&apos;t
+          reaching your account, so it won&apos;t be there on another device -
+          and the master plan won&apos;t be available as an overlay on the
+          capture map or the road network.
+          {remoteSaveError ? (
+            <>
+              {" "}
+              The server said: <em>{remoteSaveError}</em>
+            </>
+          ) : (
+            " No reason was given, which usually means the request never got through."
+          )}
         </p>
       )}
 

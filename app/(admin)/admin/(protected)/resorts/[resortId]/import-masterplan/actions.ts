@@ -39,31 +39,53 @@ const saveDraftSchema = z.object({
 
 export type SaveDraftInput = z.infer<typeof saveDraftSchema>;
 
-export async function saveMasterplanDraft(input: SaveDraftInput): Promise<boolean> {
+export interface SaveDraftOutcome {
+  ok: boolean;
+  /** What actually went wrong, so the tool can say so instead of
+   *  guessing. "Your connection is probably down" is a poor thing to tell
+   *  someone whose real problem is an un-run migration. */
+  error?: string;
+}
+
+export async function saveMasterplanDraft(
+  input: SaveDraftInput
+): Promise<SaveDraftOutcome> {
   const parsed = saveDraftSchema.safeParse(input);
-  if (!parsed.success) return false;
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid draft" };
+  }
 
   const supabase = await createClient();
   // update, not upsert: the row is created by the extract route along
-  // with the image, and a draft without an image can't be resumed. If the
-  // row is gone (resort deleted, draft cleared), saving is a no-op.
-  const { error, count } = await supabase
+  // with the image, and a draft without an image can't be resumed.
+  //
+  // .select() rather than a row count - it returns the rows actually
+  // touched, which is unambiguous, where a count on a mutation depends on
+  // the server sending Content-Range back for it.
+  const { data, error } = await supabase
     .from("masterplan_drafts")
-    .update(
-      {
-        file_name: parsed.data.fileName,
-        step: parsed.data.step,
-        labels: parsed.data.labels,
-        pairs: parsed.data.pairs,
-        last_imported_at: parsed.data.lastImportedAt
-          ? new Date(parsed.data.lastImportedAt).toISOString()
-          : null,
-      },
-      { count: "exact" }
-    )
-    .eq("resort_id", parsed.data.resortId);
+    .update({
+      file_name: parsed.data.fileName,
+      step: parsed.data.step,
+      labels: parsed.data.labels,
+      pairs: parsed.data.pairs,
+      last_imported_at: parsed.data.lastImportedAt
+        ? new Date(parsed.data.lastImportedAt).toISOString()
+        : null,
+    })
+    .eq("resort_id", parsed.data.resortId)
+    .select("resort_id");
 
-  return !error && (count ?? 0) > 0;
+  if (error) return { ok: false, error: error.message };
+  if (!data?.length) {
+    return {
+      ok: false,
+      error:
+        "There's no saved plan on the server to update. Upload the PDF again on this page — that's what creates it.",
+    };
+  }
+
+  return { ok: true };
 }
 
 // Used on page load, to describe an unfinished draft without shipping
