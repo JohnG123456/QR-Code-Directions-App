@@ -41,6 +41,7 @@ type UndoEntry =
   | { kind: "status"; siteId: string; siteNumber: string; status: SiteStatus };
 
 const UNDO_LIMIT = 25;
+const PINS_LOCKED_KEY = "capture-pins-locked";
 
 /** Which site a step refers to, whatever kind of step it is. */
 function undoTarget(entry: UndoEntry): string {
@@ -233,6 +234,30 @@ export function SatelliteCaptureTool({
   const [isSaving, setIsSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [showNumbers, setShowNumbers] = useState(true);
+  // Locked by default: reviewing and zooming is most of the work, and an
+  // accidental nudge is silent - the pin just ends up somewhere slightly
+  // wrong, which is exactly the kind of error this tool exists to find.
+  // Moving a pin is the rarer, deliberate act, so it's the one that asks
+  // for a tick.
+  const [pinsLocked, setPinsLocked] = useState<boolean>(() => {
+    // Remembered per browser. Wrapped because storage can be unavailable
+    // (private browsing, blocked site data) and a missing preference must
+    // not stop the tool loading.
+    try {
+      return window.localStorage.getItem(PINS_LOCKED_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+
+  function togglePinsLocked(locked: boolean) {
+    setPinsLocked(locked);
+    try {
+      window.localStorage.setItem(PINS_LOCKED_KEY, String(locked));
+    } catch {
+      // A preference that can't be remembered still works for this sitting.
+    }
+  }
   const [showMissing, setShowMissing] = useState(false);
   const [siteNumberToPlace, setSiteNumberToPlace] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -584,6 +609,14 @@ export function SatelliteCaptureTool({
             />
             Numbers
           </label>
+          <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm">
+            <input
+              type="checkbox"
+              checked={pinsLocked}
+              onChange={(e) => togglePinsLocked(e.target.checked)}
+            />
+            Lock pins
+          </label>
           {georeference && (
             <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm">
               <input
@@ -698,7 +731,9 @@ export function SatelliteCaptureTool({
       <p className="text-xs text-neutral-500">
         {siteNumberToPlace
           ? `Site ${siteNumberToPlace} loaded — tap its position on the map.`
-          : "Tap the imagery to drop a pin for a new site. Tap an existing pin to change its status or delete it, or drag it to correct its position. Amber = draft, green = active, gray = inactive."}
+          : pinsLocked
+            ? "Tap the imagery to drop a pin for a new site. Tap an existing pin to change its status or delete it. Pins are locked so they can't be nudged while you pan and zoom — untick Lock pins to move one. Amber = draft, green = active, gray = inactive."
+            : "Pins are unlocked: drag one to correct its position. Tap the imagery to drop a pin for a new site, or tap an existing pin to change its status or delete it. Amber = draft, green = active, gray = inactive."}
       </p>
 
       <div className="flex-1 overflow-hidden rounded-md border border-neutral-300">
@@ -745,7 +780,7 @@ export function SatelliteCaptureTool({
                   ? labelledSiteDivIcon(site.status, site.site_number)
                   : siteDivIcon(site.status)
               }
-              draggable
+              draggable={!pinsLocked}
               eventHandlers={{
                 dragend: (e) => {
                   const latlng = e.target.getLatLng();
@@ -756,6 +791,15 @@ export function SatelliteCaptureTool({
               <Popup>
                 <div className="flex flex-col gap-2 text-sm">
                   <strong>Site {site.site_number}</strong>
+                  {pinsLocked && (
+                    <button
+                      type="button"
+                      onClick={() => togglePinsLocked(false)}
+                      className="text-left text-neutral-500 underline"
+                    >
+                      Locked — unlock to drag pins
+                    </button>
+                  )}
                   <label className="flex flex-col gap-1">
                     Status
                     <select
