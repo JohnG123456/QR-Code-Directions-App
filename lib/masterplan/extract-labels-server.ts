@@ -67,8 +67,16 @@ export async function extractMasterplan(fileBuffer: Buffer): Promise<ExtractedPl
   );
   const viewport = page.getViewport({ scale });
 
+  // A viewport is the page size times a scale factor, so its dimensions
+  // are fractional. Round once, here, and use the same numbers for the
+  // canvas and for what's reported: everything downstream - the overlay
+  // corners, the stored draft, the integer columns in the database -
+  // wants whole pixels, and it should be the bitmap's real size.
+  const imageWidth = Math.round(viewport.width);
+  const imageHeight = Math.round(viewport.height);
+
   const canvas = await stage("creating canvas", () =>
-    createCanvas(viewport.width, viewport.height)
+    createCanvas(imageWidth, imageHeight)
   );
   const context = canvas.getContext("2d");
 
@@ -88,7 +96,7 @@ export async function extractMasterplan(fileBuffer: Buffer): Promise<ExtractedPl
     "encoding image",
     () => `data:image/png;base64,${canvas.toBuffer("image/png").toString("base64")}`
   );
-  const base = { imageDataUrl, imageWidth: viewport.width, imageHeight: viewport.height };
+  const base = { imageDataUrl, imageWidth, imageHeight };
 
   try {
     const textContent = await page.getTextContent();
