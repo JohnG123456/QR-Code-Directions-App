@@ -1,6 +1,24 @@
 @import "tailwindcss";
 
+/* This app is light, deliberately.
+ *
+ * Every panel, popup and map control is drawn on a fixed light surface -
+ * white cards, amber notices, satellite imagery with white-outlined pins.
+ * The scaffold shipped with a prefers-color-scheme block that flipped the
+ * text colour to near-white on a phone set to dark mode, while those
+ * surfaces stayed light: white text on a white card. On an iPhone in dark
+ * mode the whole editing panel was barely readable.
+ *
+ * Making the admin genuinely dark-mode aware would mean a second colour
+ * for every surface in it, and this is a tool used outdoors in daylight
+ * against satellite imagery, which is light whatever the phone is set to.
+ * So it declares itself light and stays consistent.
+ *
+ * color-scheme matters as much as the colours: without it iOS renders
+ * selects, inputs and scrollbars in dark chrome inside our light panels.
+ */
 :root {
+  color-scheme: light;
   --background: #ffffff;
   --foreground: #171717;
 }
@@ -10,13 +28,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {

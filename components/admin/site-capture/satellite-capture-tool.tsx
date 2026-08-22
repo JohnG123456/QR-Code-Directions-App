@@ -884,7 +884,7 @@ export function SatelliteCaptureTool({
                 <button
                   type="button"
                   onClick={() => setSelectedSiteId(null)}
-                  className="ml-auto text-neutral-500 underline"
+                  className="ml-auto text-neutral-700 underline"
                 >
                   Done
                 </button>
@@ -896,7 +896,7 @@ export function SatelliteCaptureTool({
             <button
               type="button"
               onClick={() => togglePinsLocked(false)}
-              className="w-fit text-left text-xs text-neutral-500 underline"
+              className="w-fit text-left text-xs text-neutral-700 underline"
             >
               Pins are locked — unlock to drag this one
             </button>
@@ -954,7 +954,7 @@ export function SatelliteCaptureTool({
         </div>
       )}
 
-      <p className="text-xs text-neutral-500">
+      <p className="text-xs text-neutral-700">
         {siteNumberToPlace
           ? `Site ${siteNumberToPlace} loaded — tap its position on the map.`
           : pinsLocked
