@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { draftPayloadSchema } from "@/lib/masterplan/draft-payload";
 
@@ -72,6 +73,14 @@ export async function POST(
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // These pages decide whether to offer the plan as an overlay when they
+  // render on the server. Without this they keep serving the cached "no
+  // master plan saved" note after the plan has just been saved, which
+  // reads as the save having failed.
+  revalidatePath(`/admin/resorts/${resortId}/capture-map`);
+  revalidatePath(`/admin/resorts/${resortId}/network`);
+  revalidatePath(`/admin/resorts/${resortId}/import-masterplan`);
 
   return NextResponse.json({ saved: true });
 }
