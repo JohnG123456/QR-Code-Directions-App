@@ -223,16 +223,18 @@ export async function setSiteStatus(formData: FormData) {
   });
 
   const supabase = await createClient();
-  const { error, count } = await supabase
+  const { data, error } = await supabase
     .from("sites")
-    .update({ status: parsed.status }, { count: "exact" })
-    .eq("id", parsed.siteId);
+    .update({ status: parsed.status })
+    .eq("id", parsed.siteId)
+    .select("id");
 
   if (error) throw new Error(error.message);
   // Postgres treats "no row matched" as a perfectly successful update, so
   // without this an edit aimed at a stale id reports success and changes
-  // nothing.
-  if (!count) throw new Error("That site no longer exists — reload the page.");
+  // nothing. Asking for the row back is what makes the difference
+  // visible - see the note on updateSiteLocation.
+  if (!data?.length) throw new Error("That site no longer exists — reload the page.");
   revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
   revalidatePath(`/admin/resorts/${parsed.resortId}/capture-map`);
 }
@@ -249,13 +251,14 @@ export async function deleteSite(formData: FormData) {
   });
 
   const supabase = await createClient();
-  const { error, count } = await supabase
+  const { data, error } = await supabase
     .from("sites")
-    .delete({ count: "exact" })
-    .eq("id", parsed.siteId);
+    .delete()
+    .eq("id", parsed.siteId)
+    .select("id");
 
   if (error) throw new Error(error.message);
-  if (!count) throw new Error("That site no longer exists — reload the page.");
+  if (!data?.length) throw new Error("That site no longer exists — reload the page.");
   revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
   revalidatePath(`/admin/resorts/${parsed.resortId}/capture-map`);
 }
@@ -334,16 +337,20 @@ export async function updateSiteLocation(
   }
 
   const supabase = await createClient();
-  const { error, count } = await supabase
+  // .select() rather than a row count: it makes PostgREST return the rows
+  // it actually touched, which is the only unambiguous way to tell "the
+  // edit was applied" from "nothing matched". A count on a mutation
+  // depends on the server sending Content-Range back for it, and getting
+  // that wrong would mean telling staff their edit failed when it saved
+  // perfectly well.
+  const { data, error } = await supabase
     .from("sites")
-    .update(
-      { location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})` },
-      { count: "exact" }
-    )
-    .eq("id", parsed.data.siteId);
+    .update({ location: `SRID=4326;POINT(${parsed.data.lng} ${parsed.data.lat})` })
+    .eq("id", parsed.data.siteId)
+    .select("id");
 
   if (error) return { error: error.message };
-  if (!count) return { error: "That site no longer exists — reload the page." };
+  if (!data?.length) return { error: "That site no longer exists — reload the page." };
 
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-map`);
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
