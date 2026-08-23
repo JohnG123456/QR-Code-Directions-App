@@ -214,6 +214,51 @@ export async function setEntranceNode(
   return {};
 }
 
+const clearEntranceSchema = z.object({ resortId: z.string().uuid() });
+
+// Only exists so that setting the entrance can be undone.
+//
+// The first time an entrance is set there is no previous one to put
+// back, and without a way to clear it that single action would be the
+// one thing in the editor you couldn't take back - which is exactly the
+// kind of gap that makes people stop trusting an undo button.
+export async function clearEntranceNode(
+  input: z.infer<typeof clearEntranceSchema>
+): Promise<NetworkActionState> {
+  const parsed = clearEntranceSchema.safeParse(input);
+  if (!parsed.success) return { error: "Invalid resort" };
+
+  const supabase = await createClient();
+
+  // Read it first: the node needs demoting back to an ordinary junction,
+  // and once the resort's pointer is cleared there's no way to find it.
+  const { data: resort, error: readError } = await supabase
+    .from("resorts")
+    .select("entrance_node_id")
+    .eq("id", parsed.data.resortId)
+    .maybeSingle();
+  if (readError) return { error: readError.message };
+
+  const { error } = await supabase
+    .from("resorts")
+    .update({ entrance_node_id: null })
+    .eq("id", parsed.data.resortId);
+  if (error) return { error: error.message };
+
+  if (resort?.entrance_node_id) {
+    const { error: typeError } = await supabase
+      .from("graph_nodes")
+      .update({ node_type: "intersection" })
+      .eq("id", resort.entrance_node_id)
+      .eq("resort_id", parsed.data.resortId);
+    if (typeError) return { error: typeError.message };
+  }
+
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/network`);
+  revalidatePath(`/r`);
+  return {};
+}
+
 export interface ConnectResult {
   connected: number;
   error?: string;
