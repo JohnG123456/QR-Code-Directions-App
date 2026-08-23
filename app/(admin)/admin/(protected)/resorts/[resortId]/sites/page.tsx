@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { setSiteStatus, deleteSite, updateSiteDetails } from "./actions";
+import { setSiteStatus, deleteSite, updateSiteDetails, activateAllDrafts } from "./actions";
 import { StatusSelectForm } from "@/components/admin/status-select-form";
 import { SiteDetailCells } from "@/components/admin/site-detail-cells";
 
@@ -26,6 +26,8 @@ export default async function SitesPage({
     .select("id, site_number, label, lat, lng, status, gps_accuracy_m")
     .eq("resort_id", resortId)
     .order("site_number");
+
+  const draftCount = (sites ?? []).filter((site) => site.status === "draft").length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -68,6 +70,24 @@ export default async function SitesPage({
           Import sites (CSV)
         </Link>
       </div>
+
+      {draftCount > 0 && (
+        <form action={activateAllDrafts} className="rounded-md border border-neutral-300 p-4">
+          <input type="hidden" name="resortId" value={resortId} />
+          <p className="text-sm">
+            <strong>{draftCount}</strong> site{draftCount === 1 ? " is" : "s are"} still
+            a draft, so {draftCount === 1 ? "it isn't" : "they aren't"} shown to
+            visitors. Activate them once the numbers and positions have been
+            checked.
+          </p>
+          <button
+            type="submit"
+            className="mt-3 rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+          >
+            Activate all {draftCount} drafts
+          </button>
+        </form>
+      )}
 
       <table className="w-full text-left text-sm">
         <thead className="border-b border-neutral-200 text-neutral-500">

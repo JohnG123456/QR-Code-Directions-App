@@ -356,3 +356,28 @@ export async function updateSiteLocation(
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
   return { success: true };
 }
+
+const activateDraftsSchema = z.object({ resortId: z.string().uuid() });
+
+// Makes every draft site visible to visitors in one go.
+//
+// Importing a master plan lands a few hundred sites as drafts on purpose,
+// so nothing half-checked goes live. But turning them on afterwards meant
+// working a dropdown once per site - 244 of them at Piara Waters - which
+// is not a step anyone would finish. This is the moment a resort actually
+// goes live, so it should be one deliberate action, not an afternoon.
+export async function activateAllDrafts(formData: FormData): Promise<void> {
+  const parsed = activateDraftsSchema.parse({ resortId: formData.get("resortId") });
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("sites")
+    .update({ status: "active" })
+    .eq("resort_id", parsed.resortId)
+    .eq("status", "draft");
+
+  if (error) throw new Error(error.message);
+
+  revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
+  revalidatePath(`/admin/resorts/${parsed.resortId}/capture-map`);
+}
