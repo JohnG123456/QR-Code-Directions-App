@@ -1,33 +1,53 @@
-// Works out which site numbers haven't been captured yet.
+// Works out what's still owed on a resort's site capture.
 //
-// Capturing a few hundred homes happens over multiple sittings, and once
-// there are 150 pins on the map there's no way to eyeball which numbers
-// are still owed. Resort numbering runs in a continuous sequence, so the
-// gaps in that sequence are exactly the outstanding work.
+// The count and the numbering are two different things, and conflating
+// them is what made this wrong. Piara Waters has 244 homes numbered 1 to
+// 252: eight numbers in that range were never built, because lots got
+// merged or dropped as the estate was laid out. That is completely
+// normal, and under the old logic it read as a disaster - eight homes
+// "still to capture" that don't exist, and eight numbers "above the
+// total" that are perfectly real houses.
+//
+// So the total answers one question only: how many homes are there. The
+// numbering answers a different one: which numbers are in use. Gaps in
+// the sequence are a hint about what to look for while sites are still
+// missing, never a verdict - and once the count is right, they're just
+// the skipped numbers and worth saying so plainly.
 //
 // Pure and dependency-free so it can be unit tested.
 
-export interface MissingSiteNumbers {
-  missing: string[];
-  /** Highest number considered, so the UI can explain what it searched. */
-  upTo: number;
-  /** Captured numbers that aren't plain integers, e.g. "42A" - reported so
-   *  staff know they were left out of the gap analysis rather than missed. */
+export interface SiteNumberAnalysis {
+  /** Sites captured, whatever they're numbered. */
+  capturedCount: number;
+  /** Still to find, from the count - the only reliable "am I finished". */
+  outstanding: number;
+  /** More sites than the resort has homes: something is wrong. */
+  surplus: number;
+  /** Numbers with no site, within the range the numbering covers. Only
+   *  worth showing while sites are outstanding: otherwise these are the
+   *  numbers that were never used. */
+  gaps: string[];
+  /** True when the gap list was cut short for readability. */
+  gapsTruncated: boolean;
+  /** Captured numbers above the resort's total. Ordinary when numbering
+   *  runs past the home count; only suspicious alongside a surplus. */
+  aboveTotal: string[];
+  /** Highest number in use, which is the top of the numbering range. */
+  highest: number;
+  /** Captured numbers that aren't plain integers, e.g. "42A" - left out
+   *  of the sequence checks, and reported so that's not a silent choice. */
   ignored: string[];
-  /** Captured numbers above the resort's stated total. Extracting numbers
-   *  off a drawing picks up stage numbers, drawing references and misread
-   *  digits, and they arrive looking exactly like site numbers. They're
-   *  the other half of the cross-check: if the total is right, every one
-   *  of these is either a typo for a missing number or isn't a site. */
-  unexpected: string[];
 }
 
 const PLAIN_INTEGER = /^\d+$/;
 
-export function findMissingSiteNumbers(
+// Long enough to be useful, short enough to stay readable on a phone.
+const MAX_GAPS_LISTED = 120;
+
+export function analyseSiteNumbers(
   captured: string[],
   totalHomes: number | null
-): MissingSiteNumbers {
+): SiteNumberAnalysis {
   const numeric: number[] = [];
   const ignored: string[] = [];
   const widths: number[] = [];
@@ -42,49 +62,64 @@ export function findMissingSiteNumbers(
     }
   }
 
+  const capturedCount = captured.filter((value) => value.trim().length > 0).length;
+  const total = totalHomes && totalHomes > 0 ? totalHomes : null;
+  const outstanding = total ? Math.max(0, total - capturedCount) : 0;
+  const surplus = total ? Math.max(0, capturedCount - total) : 0;
+
   if (numeric.length === 0) {
-    return { missing: [], upTo: 0, ignored, unexpected: [] };
+    return {
+      capturedCount,
+      outstanding,
+      surplus,
+      gaps: [],
+      gapsTruncated: false,
+      aboveTotal: [],
+      highest: 0,
+      ignored,
+    };
   }
 
-  // Match the padding staff are actually using ("042" not "42"), taking the
-  // most common width so one stray unpadded entry doesn't change the format.
+  // Match the padding staff are actually using ("042" not "42"), taking
+  // the most common width so one stray unpadded entry doesn't change it.
   const widthCounts = new Map<number, number>();
   for (const w of widths) widthCounts.set(w, (widthCounts.get(w) ?? 0) + 1);
   const padWidth = [...widthCounts.entries()].sort(
     (a, b) => b[1] - a[1] || b[0] - a[0]
   )[0][0];
 
-  // Prefer the resort's stated total; otherwise only report gaps *within*
-  // the range already captured, since we can't know where the numbering
-  // ends and would otherwise invent a pile of non-existent sites.
-  const highestCaptured = Math.max(...numeric);
-  // With a stated total, the gaps run 1..total and stop there. Stretching
-  // the range up to the highest captured number instead meant one misread
-  // "777" at a 244-home resort reported 772 numbers as outstanding, which
-  // buries the handful that genuinely are. Anything above the total is
-  // reported separately, as suspect rather than missing.
-  const upTo = totalHomes && totalHomes > 0 ? totalHomes : highestCaptured;
-  const lowest = totalHomes && totalHomes > 0 ? 1 : Math.min(...numeric);
+  const highest = Math.max(...numeric);
+  // The numbering can legitimately run past the home count, so the range
+  // to look for gaps in is whichever reaches further.
+  const upTo = Math.max(highest, total ?? 0);
 
   const present = new Set(numeric);
-  const missing: string[] = [];
-  for (let n = lowest; n <= upTo; n++) {
-    if (!present.has(n)) missing.push(String(n).padStart(padWidth, "0"));
+  const allGaps: string[] = [];
+  for (let n = 1; n <= upTo; n++) {
+    if (!present.has(n)) allGaps.push(String(n).padStart(padWidth, "0"));
   }
 
-  const unexpected =
-    totalHomes && totalHomes > 0
-      ? captured
-          .map((raw) => raw.trim())
-          .filter((value) => PLAIN_INTEGER.test(value) && parseInt(value, 10) > totalHomes)
-          .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
-      : [];
+  const aboveTotal = total
+    ? numeric
+        .filter((n) => n > total)
+        .sort((a, b) => a - b)
+        .map((n) => String(n).padStart(padWidth, "0"))
+    : [];
 
-  return { missing, upTo, ignored, unexpected };
+  return {
+    capturedCount,
+    outstanding,
+    surplus,
+    gaps: allGaps.slice(0, MAX_GAPS_LISTED),
+    gapsTruncated: allGaps.length > MAX_GAPS_LISTED,
+    aboveTotal,
+    highest,
+    ignored,
+  };
 }
 
-// Collapses a run of consecutive numbers into "004-009" so a long gap list
-// stays readable.
+// Collapses a run of consecutive numbers into "004-009" so a long gap
+// list stays readable.
 export function summariseRanges(numbers: string[]): string[] {
   if (numbers.length === 0) return [];
 
