@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchPublicPlanPlacement } from "@/lib/masterplan/published-overlay";
 import { fetchResortBoundary } from "@/lib/geo/resort-boundary";
 import { resolveMapBearing } from "@/lib/geo/map-bearing";
+import { fetchMapBearingOverride } from "@/lib/resorts/public-resort";
 import { RouteMap } from "./route-map";
 
 // Anything that goes wrong here used to end up as the same bare 404.
@@ -22,9 +23,14 @@ export default async function VisitorResortPage({
 
   const { data: resort, error } = await supabase
     .from("public_resorts")
-    .select(
-      "id, name, slug, default_zoom, entrance_lat, entrance_lng, is_routable, map_bearing_deg"
-    )
+    // Deliberately only the columns this page has always read.
+    //
+    // Anything added by a later migration is fetched separately below,
+    // because a column the page selects and the database hasn't got yet
+    // fails the whole query - and this is the page a guest is standing
+    // at a gate reading. A new feature not being switched on yet must
+    // never be the reason directions stop working.
+    .select("id, name, slug, default_zoom, entrance_lat, entrance_lng, is_routable")
     .eq("slug", slug)
     .maybeSingle();
 
@@ -83,9 +89,10 @@ export default async function VisitorResortPage({
   // The plan drawing, if staff have published one. Only its placement is
   // read here - a handful of numbers; the image comes down as its own
   // cacheable request from /api/r/<slug>/plan.
-  const [plan, boundary] = await Promise.all([
+  const [plan, boundary, bearingOverride] = await Promise.all([
     fetchPublicPlanPlacement(supabase, resort.id),
     fetchResortBoundary(supabase, resort.id),
+    fetchMapBearingOverride(supabase, resort.id),
   ]);
 
   // Which way the map is turned. Normally the way you're facing as you
@@ -93,7 +100,7 @@ export default async function VisitorResortPage({
   // doesn't line up with the main boulevard.
   const bearingDeg =
     resolveMapBearing(
-      (resort as { map_bearing_deg?: number | null }).map_bearing_deg,
+      bearingOverride,
       resort.entrance_lat !== null && resort.entrance_lng !== null
         ? { lat: resort.entrance_lat, lng: resort.entrance_lng }
         : null,
