@@ -5,18 +5,42 @@ import { QRCodeSVG } from "qrcode.react";
 export function QrPanel({
   resortId,
   url,
+  slug,
 }: {
   resortId: string;
   url: string;
+  slug: string;
 }) {
   // A QR code is printed once and lives on a wall for years, so a base
   // URL left at its development default is worth catching before the
   // sign-writer gets it, not after.
   const pointsAtLocalhost = /^https?:\/\/(localhost|127\.0\.0\.1)/.test(url);
 
+  // The address must end up as exactly /r/<slug>. A site URL with a path
+  // on it - or a stray character - produces a link that looks plausible
+  // and lands nowhere, which a phone's address bar hides because it shows
+  // only the domain.
+  let wrongPath: string | null = null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.pathname !== `/r/${slug}`) wrongPath = parsed.pathname;
+  } catch {
+    wrongPath = url;
+  }
+
   return (
     <div className="flex max-w-md flex-col gap-3 rounded-md border border-neutral-200 p-4">
       <h2 className="text-sm font-semibold">QR code</h2>
+
+      {wrongPath && !pointsAtLocalhost && (
+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">
+          <strong>This link won&apos;t work.</strong> It resolves to{" "}
+          <code className="break-all">{wrongPath}</code>, but this resort lives
+          at <code>/r/{slug}</code>. Check{" "}
+          <code>NEXT_PUBLIC_SITE_URL</code> in Vercel — it should be just the
+          site address, with no path after it — then redeploy.
+        </p>
+      )}
 
       {pointsAtLocalhost && (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">

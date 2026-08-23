@@ -78,7 +78,7 @@ export default async function ResortDetailPage({
         </Link>
       </div>
 
-      <QrPanel resortId={resort.id} url={resortUrl(resort.slug)} />
+      <QrPanel resortId={resort.id} url={resortUrl(resort.slug)} slug={resort.slug} />
 
       <div>
         <h2 className="mb-3 text-sm font-semibold">Settings</h2>
