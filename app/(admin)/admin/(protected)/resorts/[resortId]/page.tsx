@@ -4,7 +4,11 @@ import { createClient } from "@/lib/supabase/server";
 import { resortUrl } from "@/lib/qr/generate";
 import { ResortSettingsForm } from "@/components/admin/resort-settings-form";
 import { QrPanel } from "@/components/admin/qr-panel";
+import { PlanOverlayPanel } from "@/components/admin/plan-overlay-panel";
+import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
+import { fetchPublishedOverlayStatus } from "@/lib/masterplan/published-overlay";
 import { updateResort, deleteResort } from "../actions";
+import { publishPlanOverlay, unpublishPlanOverlay } from "./plan-overlay/actions";
 
 export default async function ResortDetailPage({
   params,
@@ -24,10 +28,14 @@ export default async function ResortDetailPage({
 
   if (!resort) notFound();
 
-  const { count: siteCount } = await supabase
-    .from("sites")
-    .select("id", { count: "exact", head: true })
-    .eq("resort_id", resortId);
+  const [{ count: siteCount }, planDraft, publishedOverlay] = await Promise.all([
+    supabase
+      .from("sites")
+      .select("id", { count: "exact", head: true })
+      .eq("resort_id", resortId),
+    describePlanOverlay(supabase, resortId),
+    fetchPublishedOverlayStatus(supabase, resortId),
+  ]);
 
   return (
     <div className="flex flex-col gap-8">
@@ -79,6 +87,30 @@ export default async function ResortDetailPage({
       </div>
 
       <QrPanel resortId={resort.id} url={resortUrl(resort.slug)} slug={resort.slug} />
+
+      <PlanOverlayPanel
+        resortId={resort.id}
+        resortIsPublished={resort.is_published}
+        published={
+          publishedOverlay.kind === "published" ? publishedOverlay.status : null
+        }
+        draftSavedAt={
+          planDraft.kind === "ready"
+            ? new Date(planDraft.summary.savedAt).toISOString()
+            : null
+        }
+        // A missing overlay table stops publishing regardless of how
+        // healthy the draft is, so it takes priority.
+        planIssue={
+          publishedOverlay.kind === "not-migrated"
+            ? "not-migrated"
+            : planDraft.kind === "ready"
+              ? null
+              : planDraft.kind
+        }
+        publishPlanOverlay={publishPlanOverlay}
+        unpublishPlanOverlay={unpublishPlanOverlay}
+      />
 
       <div>
         <h2 className="mb-3 text-sm font-semibold">Settings</h2>
