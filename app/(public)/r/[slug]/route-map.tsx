@@ -22,21 +22,22 @@ interface RouteResult {
 
 // How much of the plan drawing is shown, per view.
 //
-// "Both" is the default because it is the view that actually answers the
-// visitor's question: the plan carries the numbers, the imagery
-// underneath says which buildings exist yet and what the place looks
-// like when you're standing in it.
+// The plan at full strength is the default. It is the drawing that
+// carries the site numbers and the street names, and it is what the
+// resort's own signage and paperwork look like - so it is what a guest
+// is most likely to recognise. The imagery underneath is still one tap
+// away for anyone who wants to see what the place actually looks like.
 const PLAN_VIEWS = {
-  both: 0.75,
   plan: 1,
+  both: 0.75,
   satellite: 0,
 } as const;
 
 type PlanView = keyof typeof PLAN_VIEWS;
 
 const PLAN_VIEW_LABELS: Record<PlanView, string> = {
-  both: "Both",
   plan: "Site plan",
+  both: "Both",
   satellite: "Satellite",
 };
 
@@ -69,7 +70,7 @@ export function RouteMap({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [routeState, setRouteState] = useState<"idle" | "loading" | "done">("idle");
-  const [planView, setPlanView] = useState<PlanView>("both");
+  const [planView, setPlanView] = useState<PlanView>("plan");
 
   const matches = useMemo(() => {
     if (!query.trim()) return [];
