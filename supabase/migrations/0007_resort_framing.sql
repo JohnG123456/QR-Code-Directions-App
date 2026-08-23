@@ -23,6 +23,27 @@ alter table public.resorts
 comment on column public.resorts.map_bearing_deg is
   'Compass bearing drawn straight up the visitor map. Null means work it out from the entrance towards the middle of the resort.';
 
+-- The visitor page reads resorts through public_resorts, never the table
+-- itself, so a new column on the table is invisible to it until the view
+-- says so. Adding it here rather than leaving that to be noticed later:
+-- a column the page selects and the view doesn't have isn't a missing
+-- feature, it's an error that takes the whole page down.
+--
+-- Appended at the end because `create or replace view` can add columns
+-- but cannot reorder or remove them.
+create or replace view public.public_resorts as
+  select
+    id,
+    name,
+    slug,
+    default_zoom,
+    center_lat as entrance_lat,
+    center_lng as entrance_lng,
+    (entrance_node_id is not null) as is_routable,
+    map_bearing_deg
+  from public.resorts
+  where is_published;
+
 -- The resort's own outline, as the visitor page needs it.
 --
 -- Built from where the homes actually are rather than from a drawn
