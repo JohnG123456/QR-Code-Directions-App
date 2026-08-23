@@ -7,6 +7,7 @@ import { QrPanel } from "@/components/admin/qr-panel";
 import { PlanOverlayPanel } from "@/components/admin/plan-overlay-panel";
 import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
 import { fetchPublishedOverlayStatus } from "@/lib/masterplan/published-overlay";
+import { resolveMapBearing } from "@/lib/geo/map-bearing";
 import { updateResort, deleteResort } from "../actions";
 import { publishPlanOverlay, unpublishPlanOverlay } from "./plan-overlay/actions";
 
@@ -28,14 +29,37 @@ export default async function ResortDetailPage({
 
   if (!resort) notFound();
 
-  const [{ count: siteCount }, planDraft, publishedOverlay] = await Promise.all([
-    supabase
-      .from("sites")
-      .select("id", { count: "exact", head: true })
-      .eq("resort_id", resortId),
-    describePlanOverlay(supabase, resortId),
-    fetchPublishedOverlayStatus(supabase, resortId),
-  ]);
+  const [{ count: siteCount }, planDraft, publishedOverlay, { data: siteCoords }, { data: roadShapes }] =
+    await Promise.all([
+      supabase
+        .from("sites")
+        .select("id", { count: "exact", head: true })
+        .eq("resort_id", resortId),
+      describePlanOverlay(supabase, resortId),
+      fetchPublishedOverlayStatus(supabase, resortId),
+      supabase.from("sites").select("lat, lng").eq("resort_id", resortId),
+      supabase.from("graph_edges_view").select("geojson").eq("resort_id", resortId),
+    ]);
+
+  // What the map is turned to when the rotation is left on automatic.
+  // Shown rather than left as a mystery: without it, "auto isn't quite
+  // straight" leaves you with nothing to adjust from.
+  const autoBearing =
+    resort.center_lat !== null && resort.center_lng !== null
+      ? resolveMapBearing(
+          null,
+          { lat: resort.center_lat, lng: resort.center_lng },
+          (siteCoords ?? []).flatMap((s) =>
+            s.lat !== null && s.lng !== null ? [{ lat: s.lat, lng: s.lng }] : []
+          ),
+          (roadShapes ?? []).flatMap((row) => {
+            const geo = (row as { geojson: { coordinates?: [number, number][] } | null }).geojson;
+            return geo?.coordinates
+              ? [{ shape: geo.coordinates.map(([lng, lat]) => [lat, lng] as [number, number]) }]
+              : [];
+          })
+        )
+      : null;
 
   return (
     <div className="flex flex-col gap-8">
@@ -128,6 +152,7 @@ export default async function ResortDetailPage({
           defaultZoom={resort.default_zoom}
           totalHomes={resort.total_homes}
           mapBearingDeg={resort.map_bearing_deg}
+          autoBearingDeg={autoBearing}
           centerLat={resort.center_lat}
           centerLng={resort.center_lng}
           updateResort={updateResort}
