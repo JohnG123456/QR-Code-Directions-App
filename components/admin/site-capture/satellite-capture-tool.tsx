@@ -5,7 +5,7 @@ import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
 import { fixDefaultLeafletIcon } from "@/lib/map/fix-default-icon";
 import { siteDivIcon, labelledSiteDivIcon } from "@/lib/map/site-icon";
-import { findMissingSiteNumbers, summariseRanges } from "@/lib/sites/missing-site-numbers";
+import { analyseSiteNumbers, summariseRanges } from "@/lib/sites/missing-site-numbers";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import { PlanImageOverlay } from "@/components/map/plan-image-overlay";
 import { georeferencePlan } from "@/lib/geo/plan-georeference";
@@ -597,7 +597,7 @@ export function SatelliteCaptureTool({
 
   const selectedSite = sites.find((s) => s.id === selectedSiteId) ?? null;
 
-  const missingSummary = findMissingSiteNumbers(
+  const numbers = analyseSiteNumbers(
     sites.map((s) => s.site_number),
     totalHomes
   );
@@ -705,7 +705,11 @@ export function SatelliteCaptureTool({
         </div>
       </div>
 
-      {missingSummary.unexpected.length > 0 && (
+      {/* Too many sites for the resort's home count. Numbers above the
+          total are the first place to look, but only because there are
+          too many - a resort whose numbering simply runs past its home
+          count is normal and says nothing is wrong. */}
+      {numbers.surplus > 0 && (
         <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
           <button
             type="button"
@@ -713,8 +717,7 @@ export function SatelliteCaptureTool({
             className="flex w-full items-center justify-between gap-2 text-left text-sm font-medium text-amber-900"
           >
             <span>
-              {missingSummary.unexpected.length} number
-              {missingSummary.unexpected.length === 1 ? " is" : "s are"} above
+              {numbers.surplus} more site{numbers.surplus === 1 ? "" : "s"} than
               the {totalHomes} homes at this resort
             </span>
             <span aria-hidden>{showUnexpected ? "-" : "+"}</span>
@@ -723,25 +726,106 @@ export function SatelliteCaptureTool({
             <div className="mt-2 flex flex-col gap-2">
               <p className="text-xs text-amber-900">
                 Scanning a drawing picks up stage numbers, drawing references
-                and misread digits. If the total is right, each of these is
-                either a typo for one of the missing numbers or isn&apos;t a
-                site at all. Tap one to go to it, then rename or delete it.
+                and misread digits. Numbers above {totalHomes} are the first
+                place to look, though they can be genuine if the numbering runs
+                past the home count. Tap one to go to it.
+              </p>
+              {numbers.aboveTotal.length > 0 && (
+                <div className="flex max-h-32 flex-wrap gap-1 overflow-auto">
+                  {numbers.aboveTotal.map((number) => (
+                    <button
+                      key={number}
+                      type="button"
+                      onClick={() => jumpTo(number)}
+                      className="rounded bg-white px-1.5 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
+                    >
+                      {number}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Only while sites are genuinely outstanding. Gaps in the numbering
+          are candidates for what's missing, not a count of it: numbers get
+          skipped when lots are merged or dropped, and treating every gap as
+          a missing home reported eight phantom houses at a resort that was
+          finished. */}
+      {numbers.outstanding > 0 && (
+        <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
+          <button
+            type="button"
+            onClick={() => setShowMissing((v) => !v)}
+            className="flex w-full items-center justify-between gap-2 text-left text-sm font-medium text-amber-900"
+          >
+            <span>
+              {numbers.outstanding} more site
+              {numbers.outstanding === 1 ? "" : "s"} to capture
+            </span>
+            <span aria-hidden>{showMissing ? "-" : "+"}</span>
+          </button>
+          {showMissing && (
+            <div className="mt-2 flex flex-col gap-2">
+              <p className="text-xs text-amber-900">
+                {numbers.gaps.length} number
+                {numbers.gaps.length === 1 ? " has" : "s have"} no site, within
+                the 1-{Math.max(numbers.highest, totalHomes ?? 0)} the numbering
+                covers. Some of these may never have been used - tap one to load
+                it, then tap its spot on the map.
               </p>
               <div className="flex max-h-32 flex-wrap gap-1 overflow-auto">
-                {missingSummary.unexpected.map((number) => (
+                {numbers.gaps.map((number) => (
                   <button
                     key={number}
                     type="button"
-                    onClick={() => jumpTo(number)}
-                    className="rounded bg-white px-1.5 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
+                    onClick={() => setSiteNumberToPlace(number)}
+                    className={
+                      siteNumberToPlace === number
+                        ? "rounded bg-amber-600 px-1.5 py-0.5 text-xs font-medium text-white"
+                        : "rounded bg-white px-1.5 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
+                    }
                   >
                     {number}
                   </button>
                 ))}
               </div>
+              {numbers.gapsTruncated && (
+                <p className="text-xs text-amber-800">
+                  Only the first {numbers.gaps.length} are listed.
+                </p>
+              )}
+              <p className="break-words text-xs text-amber-800">
+                Gaps: {summariseRanges(numbers.gaps).join(", ")}
+              </p>
+              {numbers.ignored.length > 0 && (
+                <p className="break-words text-xs text-amber-800">
+                  Not included in this check (not plain numbers):{" "}
+                  {numbers.ignored.join(", ")}
+                </p>
+              )}
             </div>
           )}
         </div>
+      )}
+
+      {/* The finished state deserves saying out loud, including what the
+          leftover gaps are, so nobody goes hunting for houses that were
+          never built. */}
+      {totalHomes !== null && numbers.outstanding === 0 && numbers.surplus === 0 && (
+        <p className="rounded-md border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-900">
+          <strong>All {totalHomes} homes captured.</strong>
+          {numbers.gaps.length > 0 && (
+            <>
+              {" "}
+              Numbering runs 1-{numbers.highest}, with {numbers.gaps.length}{" "}
+              number{numbers.gaps.length === 1 ? "" : "s"} not in use:{" "}
+              {summariseRanges(numbers.gaps).join(", ")}.
+            </>
+          )}
+        </p>
       )}
 
       {planLoading && (
@@ -900,56 +984,6 @@ export function SatelliteCaptureTool({
             >
               Pins are locked — unlock to drag this one
             </button>
-          )}
-        </div>
-      )}
-
-      {missingSummary.missing.length > 0 && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 p-3">
-          <button
-            type="button"
-            onClick={() => setShowMissing((v) => !v)}
-            className="flex w-full items-center justify-between gap-2 text-left text-sm font-medium text-amber-900"
-          >
-            <span>
-              {missingSummary.missing.length} site number
-              {missingSummary.missing.length === 1 ? "" : "s"} still to capture
-              (checked 1-{missingSummary.upTo})
-            </span>
-            <span aria-hidden>{showMissing ? "-" : "+"}</span>
-          </button>
-
-          {showMissing && (
-            <div className="mt-2 flex flex-col gap-2">
-              <p className="text-xs text-amber-900">
-                Tap a number to load it, then tap its spot on the map.
-              </p>
-              <div className="flex max-h-32 flex-wrap gap-1 overflow-auto">
-                {missingSummary.missing.map((number) => (
-                  <button
-                    key={number}
-                    type="button"
-                    onClick={() => setSiteNumberToPlace(number)}
-                    className={
-                      siteNumberToPlace === number
-                        ? "rounded bg-amber-600 px-1.5 py-0.5 text-xs font-medium text-white"
-                        : "rounded bg-white px-1.5 py-0.5 text-xs text-amber-900 hover:bg-amber-100"
-                    }
-                  >
-                    {number}
-                  </button>
-                ))}
-              </div>
-              <p className="break-words text-xs text-amber-800">
-                Gaps: {summariseRanges(missingSummary.missing).join(", ")}
-              </p>
-              {missingSummary.ignored.length > 0 && (
-                <p className="break-words text-xs text-amber-800">
-                  Not included in this check (not plain numbers):{" "}
-                  {missingSummary.ignored.join(", ")}
-                </p>
-              )}
-            </div>
           )}
         </div>
       )}
