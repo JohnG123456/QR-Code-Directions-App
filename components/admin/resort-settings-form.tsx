@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useActionState, useState } from "react";
 import { CenterPicker } from "@/components/map/center-picker";
 import { NameSlugFields } from "@/components/admin/name-slug-fields";
+import type { ResortSaveState } from "@/app/(admin)/admin/(protected)/resorts/actions";
 
 interface ResortSettingsFormProps {
   resortId: string;
@@ -13,7 +14,11 @@ interface ResortSettingsFormProps {
   totalHomes: number | null;
   centerLat: number | null;
   centerLng: number | null;
-  updateResort: (formData: FormData) => void;
+  updateResort: (
+    prevState: ResortSaveState,
+    formData: FormData
+  ) => Promise<ResortSaveState>;
+  siteCount: number;
   deleteResort: (formData: FormData) => void;
 }
 
@@ -28,7 +33,13 @@ export function ResortSettingsForm({
   centerLng,
   updateResort,
   deleteResort,
+  siteCount,
 }: ResortSettingsFormProps) {
+  const [saveState, saveAction, isSaving] = useActionState<ResortSaveState, FormData>(
+    updateResort,
+    {}
+  );
+
   const [center, setCenter] = useState<{ lat: number; lng: number } | null>(
     centerLat !== null && centerLng !== null
       ? { lat: centerLat, lng: centerLng }
@@ -37,7 +48,7 @@ export function ResortSettingsForm({
 
   return (
     <div className="flex flex-col gap-8">
-      <form action={updateResort} className="flex max-w-md flex-col gap-3">
+      <form action={saveAction} className="flex max-w-md flex-col gap-3">
         <input type="hidden" name="resortId" value={resortId} />
         <NameSlugFields defaultName={defaultName} defaultSlug={defaultSlug} />
 
@@ -90,17 +101,43 @@ export function ResortSettingsForm({
 
         <button
           type="submit"
-          className="mt-1 w-fit rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white"
+          disabled={isSaving}
+          className="mt-1 w-fit rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >
-          Save changes
+          {isSaving ? "Saving…" : "Save changes"}
         </button>
+
+        {/* Saving used to leave the screen looking identical, so there was
+            no way to tell a successful save from a tap that missed. The
+            confirmation says what the save actually did - publishing a
+            resort is the moment it becomes visible to guests, and that
+            deserves to be stated rather than inferred. */}
+        {saveState.error && (
+          <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">
+            {saveState.error}
+          </p>
+        )}
+        {saveState.savedAt && !saveState.error && (
+          <p className="rounded-md bg-green-50 px-3 py-2 text-sm text-green-900">
+            <strong>Saved.</strong>{" "}
+            {saveState.published
+              ? `This resort is published — guests scanning the QR code will reach it at /r/${defaultSlug}.`
+              : "This resort is not published, so guests scanning the QR code will get “not found”."}
+          </p>
+        )}
       </form>
 
       <form
         action={deleteResort}
         className="w-fit"
         onSubmit={(e) => {
-          if (!confirm(`Delete "${defaultName}" and all of its sites? This cannot be undone.`)) {
+          const stake =
+            siteCount === 1 ? "1 captured site" : `all ${siteCount} captured sites`;
+          if (
+            !confirm(
+              `Delete "${defaultName}" and ${stake}? This cannot be undone, and the QR code for this resort will stop working.`
+            )
+          ) {
             e.preventDefault();
           }
         }}

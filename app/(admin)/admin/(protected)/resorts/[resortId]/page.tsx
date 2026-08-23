@@ -92,6 +92,7 @@ export default async function ResortDetailPage({
           centerLat={resort.center_lat}
           centerLng={resort.center_lng}
           updateResort={updateResort}
+          siteCount={siteCount ?? 0}
           deleteResort={deleteResort}
         />
       </div>
