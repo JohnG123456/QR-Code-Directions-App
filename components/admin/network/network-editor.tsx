@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, Marker, Polyline, useMapEvents } from "react-leaflet";
+import { MapContainer, Marker, Polyline, useMap, useMapEvents } from "react-leaflet";
 import L from "leaflet";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import { PlanImageOverlay } from "@/components/map/plan-image-overlay";
@@ -360,6 +360,10 @@ export function NetworkEditor({
   const [inFlight, setInFlight] = useState(0);
   /** What the next click would join onto, so it can be drawn. */
   const [snapPreview, setSnapPreview] = useState<SnapTarget | null>(null);
+
+  // Leaflet layers handle their own clicks (see the note on the markers
+  // below), and that handling needs the map to convert positions.
+  const mapRef = useRef<L.Map | null>(null);
 
   // Placeholder ids handed out to things drawn before the database has
   // answered, and the map from those to the real ids once it has.
@@ -1092,24 +1096,39 @@ export function NetworkEditor({
         )}
       </div>
 
-      <p className="text-sm text-neutral-600">
-        {mode === "draw"
-          ? chainNodeId
-            ? "Keep tapping along the street — each tap continues the road. Tap an existing junction, or anywhere along an existing road, to join onto it, then Finish."
-            : "Tap where a street starts, then tap along it. Tap an existing junction — or anywhere along an existing road — to join onto it; the road is split at that point so the join is real."
-          : "Tap a junction or a road to move or delete it. Drag a junction to reposition it — the roads follow."}
-      </p>
-
-      {nextUndo && !undoNote && (
-        <p className="text-xs text-neutral-500">
-          Undo will take back {describeStep(nextUndo)}.
+      {/* Fixed height, deliberately.
+          These lines come and go as you work — the undo hint after the
+          first action, an error, the plan loading — and every time one
+          did, everything below it moved. On a touch screen that means the
+          map slides out from under your finger between taps, so the next
+          tap lands somewhere you didn't aim. Reserving the space keeps
+          the map still. */}
+      <div className="flex min-h-[5rem] flex-col gap-1 sm:min-h-[4rem]">
+        <p className="text-sm text-neutral-600">
+          {mode === "draw"
+            ? chainNodeId
+              ? "Keep tapping along the street — each tap continues the road. Tap an existing junction, or anywhere along an existing road, to join onto it, then Finish."
+              : "Tap where a street starts, then tap along it. Tap an existing junction — or anywhere along an existing road — to join onto it; the road is split at that point so the join is real."
+            : "Tap a junction or a road to move or delete it. Drag a junction to reposition it — the roads follow."}
         </p>
-      )}
-      {undoNote && <p className="text-xs text-green-700">{undoNote}</p>}
 
-      {planLoading && (
-        <p className="text-xs text-neutral-500">Loading the master plan image…</p>
-      )}
+        <p className="text-xs" aria-live="polite">
+          {planLoading ? (
+            <span className="text-neutral-500">Loading the master plan image…</span>
+          ) : error ? (
+            <span className="text-red-600">{error}</span>
+          ) : undoNote ? (
+            <span className="text-green-700">{undoNote}</span>
+          ) : nextUndo ? (
+            <span className="text-neutral-500">
+              Undo will take back {describeStep(nextUndo)}.
+            </span>
+          ) : (
+            <span>&nbsp;</span>
+          )}
+        </p>
+      </div>
+
       {!georeference && (
         <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-900">
           {planUnavailable === "not-migrated" ? (
@@ -1143,8 +1162,6 @@ export function NetworkEditor({
           Satellite imagery still works for streets that have been built.
         </p>
       )}
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
       <div className="h-[70vh] w-full overflow-hidden rounded-md border border-neutral-200">
         <MapContainer
           center={[centerLat, centerLng]}
@@ -1152,6 +1169,7 @@ export function NetworkEditor({
           className="h-full w-full"
         >
           <BasemapTileLayer />
+          <CaptureMap mapRef={mapRef} />
 
           {showPlan && planImage && georeference && planCalibration && (
             <PlanImageOverlay
@@ -1206,10 +1224,18 @@ export function NetworkEditor({
                 opacity: 0.9,
               }}
               eventHandlers={{
-                click: () => {
-                  if (mode !== "edit") return;
-                  setSelectedEdgeId(edge.id);
-                  setSelectedNodeId(null);
+                // Same reason as the junctions: a tap that lands on the
+                // line is the road's to handle, not the map's.
+                click: (event) => {
+                  if (mode === "edit") {
+                    setSelectedEdgeId(edge.id);
+                    setSelectedNodeId(null);
+                    return;
+                  }
+                  const map = mapRef.current;
+                  if (!map) return;
+                  const snap = snapToEdge(map, event.latlng, edge);
+                  if (snap) extendChain(snap.lat, snap.lng, snap);
                 },
               }}
             />
@@ -1235,11 +1261,25 @@ export function NetworkEditor({
               )}
               draggable={mode === "edit"}
               eventHandlers={{
+                // Leaflet gives a click to the layer under it and stops
+                // there - the map's own click handler never runs. So the
+                // junction has to do the joining itself: relying on the
+                // map to notice a tap that landed on a marker meant
+                // tapping a junction did nothing at all, which is
+                // exactly the thing you'd try first when joining two
+                // roads together.
                 click: () => {
                   if (mode === "edit") {
                     setSelectedNodeId(node.id);
                     setSelectedEdgeId(null);
+                    return;
                   }
+                  extendChain(node.lat, node.lng, {
+                    kind: "node",
+                    nodeId: node.id,
+                    lat: node.lat,
+                    lng: node.lng,
+                  });
                 },
                 dragend: (event) => {
                   const { lat, lng } = (event.target as L.Marker).getLatLng();
@@ -1345,6 +1385,41 @@ export function NetworkEditor({
       </div>
     </div>
   );
+}
+
+// Hands the map instance back out of the container, so the layers'
+// own click handlers can do the same snapping maths the map does.
+function CaptureMap({ mapRef }: { mapRef: React.MutableRefObject<L.Map | null> }) {
+  const map = useMap();
+  useEffect(() => {
+    mapRef.current = map;
+    return () => {
+      mapRef.current = null;
+    };
+  }, [map, mapRef]);
+  return null;
+}
+
+/** Where along one particular road a click fell. */
+function snapToEdge(map: L.Map, latlng: L.LatLng, edge: GraphEdge): SnapTarget | null {
+  if (edge.shape.length < 2) return null;
+  const clicked = map.latLngToContainerPoint(latlng);
+  const hit = closestPointOnPolyline(
+    { x: clicked.x, y: clicked.y },
+    edge.shape.map(([lat, lng]) => {
+      const p = map.latLngToContainerPoint([lat, lng]);
+      return { x: p.x, y: p.y };
+    })
+  );
+  if (!hit) return null;
+  const snapped = map.containerPointToLatLng([hit.point.x, hit.point.y]);
+  return {
+    kind: "edge",
+    edgeId: edge.id,
+    lat: snapped.lat,
+    lng: snapped.lng,
+    index: hit.index,
+  };
 }
 
 function MapClickHandler({
