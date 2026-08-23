@@ -25,6 +25,12 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 export interface PanTarget {
   panBy(dx: number, dy: number): void;
+  /** Leaflet caches how big its container is and only re-reads it when
+   *  told. The square inside this frame changes size whenever the frame
+   *  does - a phone rotating, the address bar sliding away - and a map
+   *  working from a stale size draws its tiles for the old one, which
+   *  looks like the map failing to load. */
+  invalidateSize(): void;
 }
 
 export function RotatedMapFrame({
@@ -51,12 +57,26 @@ export function RotatedMapFrame({
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame) return;
-    const measure = () => setSize({ w: frame.clientWidth, h: frame.clientHeight });
+    const measure = () =>
+      setSize((previous) => {
+        const next = { w: frame.clientWidth, h: frame.clientHeight };
+        // Same size, same object - otherwise every observer callback
+        // re-renders the map for nothing.
+        return previous && previous.w === next.w && previous.h === next.h ? previous : next;
+      });
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(frame);
     return () => observer.disconnect();
   }, []);
+
+  // Tell the map its container changed, after the new size has been
+  // painted. Without this a resize leaves it drawing for the old one.
+  useEffect(() => {
+    if (!panTarget || !size || size.w === 0 || size.h === 0) return;
+    const id = requestAnimationFrame(() => panTarget.invalidateSize());
+    return () => cancelAnimationFrame(id);
+  }, [panTarget, size]);
 
   // Drag, corrected for the rotation.
   useEffect(() => {
@@ -119,9 +139,14 @@ export function RotatedMapFrame({
   // stops showing you where you're going.
   const safeInset = size ? Math.max(0, (side - Math.min(size.w, size.h)) / 2) : 0;
 
+  // A frame measured at zero - which happens if layout hasn't settled
+  // when the observer first fires - would give a zero-sized square and a
+  // map nobody can see. Wait for a real measurement instead.
+  const ready = size !== null && size.w > 0 && size.h > 0;
+
   return (
     <div ref={frameRef} className={`relative overflow-hidden ${className ?? ""}`}>
-      {size && (
+      {ready && size && (
         <div
           style={{
             position: "absolute",
