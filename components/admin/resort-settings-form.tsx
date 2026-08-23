@@ -12,6 +12,7 @@ interface ResortSettingsFormProps {
   defaultIsPublished: boolean;
   defaultZoom: number;
   totalHomes: number | null;
+  mapBearingDeg: number | null;
   centerLat: number | null;
   centerLng: number | null;
   updateResort: (
@@ -29,6 +30,7 @@ export function ResortSettingsForm({
   defaultIsPublished,
   defaultZoom,
   totalHomes,
+  mapBearingDeg,
   centerLat,
   centerLng,
   updateResort,
@@ -84,6 +86,27 @@ export function ResortSettingsForm({
             placeholder="e.g. 352"
             className="w-24 rounded-md border border-neutral-300 px-3 py-2"
           />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          Map rotation (optional)
+          <input
+            type="number"
+            name="mapBearingDeg"
+            min={0}
+            max={360}
+            step={1}
+            defaultValue={mapBearingDeg ?? ""}
+            placeholder="auto"
+            className="w-24 rounded-md border border-neutral-300 px-3 py-2"
+          />
+          <span className="max-w-md text-xs text-neutral-500">
+            Which compass bearing points straight up the visitor&apos;s map, so
+            that walking in from the entrance is up the screen. Leave blank and
+            it&apos;s worked out from the entrance towards the middle of the
+            resort, which is right for most resorts. Set it to line the main
+            boulevard up exactly — 0 is north, 90 east, 180 south, 270 west.
+          </span>
         </label>
 
         <input type="hidden" name="centerLat" value={center?.lat ?? ""} />

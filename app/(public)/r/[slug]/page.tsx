@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { fetchPublicPlanPlacement } from "@/lib/masterplan/published-overlay";
+import { fetchResortBoundary } from "@/lib/geo/resort-boundary";
+import { resolveMapBearing } from "@/lib/geo/map-bearing";
 import { RouteMap } from "./route-map";
 
 // Anything that goes wrong here used to end up as the same bare 404.
@@ -20,7 +22,9 @@ export default async function VisitorResortPage({
 
   const { data: resort, error } = await supabase
     .from("public_resorts")
-    .select("id, name, slug, default_zoom, entrance_lat, entrance_lng, is_routable")
+    .select(
+      "id, name, slug, default_zoom, entrance_lat, entrance_lng, is_routable, map_bearing_deg"
+    )
     .eq("slug", slug)
     .maybeSingle();
 
@@ -79,7 +83,24 @@ export default async function VisitorResortPage({
   // The plan drawing, if staff have published one. Only its placement is
   // read here - a handful of numbers; the image comes down as its own
   // cacheable request from /api/r/<slug>/plan.
-  const plan = await fetchPublicPlanPlacement(supabase, resort.id);
+  const [plan, boundary] = await Promise.all([
+    fetchPublicPlanPlacement(supabase, resort.id),
+    fetchResortBoundary(supabase, resort.id),
+  ]);
+
+  // Which way the map is turned. Normally the way you're facing as you
+  // walk in from the entrance; a resort can override it where that
+  // doesn't line up with the main boulevard.
+  const bearingDeg =
+    resolveMapBearing(
+      (resort as { map_bearing_deg?: number | null }).map_bearing_deg,
+      resort.entrance_lat !== null && resort.entrance_lng !== null
+        ? { lat: resort.entrance_lat, lng: resort.entrance_lng }
+        : null,
+      (sites ?? []).flatMap((s) =>
+        s.lat !== null && s.lng !== null ? [{ lat: s.lat, lng: s.lng }] : []
+      )
+    ) ?? 0;
 
   return (
     <RouteMap
@@ -91,6 +112,8 @@ export default async function VisitorResortPage({
           ? `/api/r/${encodeURIComponent(slug)}/plan?v=${encodeURIComponent(plan.publishedAt)}`
           : null
       }
+      bearingDeg={bearingDeg}
+      boundary={boundary}
     />
   );
 }
