@@ -267,6 +267,20 @@ export function RouteMap({
   );
 }
 
+// The resorts are named for their suburb in the admin - "Piara Waters" -
+// but they trade as "<name> Lifestyle Resort", and that's the name on
+// the signage a guest has just scanned. Built here rather than stored,
+// so it's right for all six without anyone retyping it; the trim is for
+// a resort whose name already carries the words, so nothing ends up
+// reading "Piara Waters Resort Lifestyle Resort".
+export function visitorTitle(resortName: string): string {
+  const trimmed = resortName
+    .trim()
+    .replace(/\s+(lifestyle\s+)?resort$/i, "")
+    .trim();
+  return `${trimmed || resortName.trim()} Lifestyle Resort`;
+}
+
 function Header({ resortName }: { resortName: string }) {
   return (
     <header className="shrink-0 border-b-[3px] border-[#702890] px-4 pb-2.5 pt-3">
@@ -281,7 +295,7 @@ function Header({ resortName }: { resortName: string }) {
         />
         <div className="min-w-0">
           <p className="truncate font-serif text-[19px] leading-tight text-[#702890]">
-            {resortName} Resort
+            {visitorTitle(resortName)}
           </p>
           <p className="text-[12px] leading-tight text-neutral-500">
             Find your home
