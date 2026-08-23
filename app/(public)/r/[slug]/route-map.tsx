@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Image from "next/image";
 import dynamic from "next/dynamic";
 import {
   bearingDegrees,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/geo/distance";
 import type { PublicResort, PublicSite } from "@/lib/types";
 import type { PlanOverlayPlacement } from "@/lib/masterplan/published-overlay";
+import type { BoundaryRings } from "@/components/map/outside-mask";
 
 interface RouteResult {
   distanceM: number;
@@ -21,13 +23,11 @@ interface RouteResult {
 // How much of the plan drawing is shown, per view.
 //
 // "Both" is the default because it is the view that actually answers the
-// visitor's question: the plan carries the site numbers and street names,
-// the imagery underneath it says which of those buildings exist yet and
-// what the place looks like when you're standing in it. Satellite alone
-// is rows of identical roofs; the plan alone loses the landmarks people
-// steer by.
+// visitor's question: the plan carries the numbers, the imagery
+// underneath says which buildings exist yet and what the place looks
+// like when you're standing in it.
 const PLAN_VIEWS = {
-  both: 0.65,
+  both: 0.75,
   plan: 1,
   satellite: 0,
 } as const;
@@ -44,7 +44,7 @@ const PLAN_VIEW_LABELS: Record<PlanView, string> = {
 // itself must be excluded from the server render.
 const LeafletRouteView = dynamic(
   () => import("./leaflet-route-view").then((m) => m.LeafletRouteView),
-  { ssr: false, loading: () => <div className="h-96 w-full animate-pulse bg-neutral-100" /> }
+  { ssr: false, loading: () => <div className="h-full w-full animate-pulse bg-neutral-100" /> }
 );
 
 export function RouteMap({
@@ -52,12 +52,18 @@ export function RouteMap({
   sites,
   plan,
   planImageUrl,
+  bearingDeg,
+  boundary,
 }: {
   resort: PublicResort;
   sites: PublicSite[];
   /** The published master plan, when this resort has one. */
   plan: PlanOverlayPlacement | null;
   planImageUrl: string | null;
+  /** Compass bearing drawn straight up, so walking in is up the page. */
+  bearingDeg: number;
+  /** The resort's outline; everything outside it is greyed out. */
+  boundary: BoundaryRings;
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -117,26 +123,29 @@ export function RouteMap({
         })()
       : null;
 
-  return (
-    // Fixed to the viewport height, not a minimum.
-    //
-    // `min-h-screen` only guarantees the page is *at least* a screen
-    // tall, which leaves the map sized by its own content - a 384px band
-    // with a slab of dead white space under it on a phone. `h-dvh` gives
-    // the column a definite height for the map to fill, and dvh rather
-    // than vh so it accounts for the browser's own address bar instead
-    // of hiding the bottom of the map behind it.
-    <div className="flex h-dvh flex-col overflow-hidden">
-      <header className="border-b border-neutral-200 px-4 py-4">
-        <h1 className="text-lg font-semibold">{resort.name}</h1>
-        <p className="text-sm text-neutral-500">Find your site</p>
-      </header>
+  function reset() {
+    setQuery("");
+    setSelectedId(null);
+    setRoute(null);
+    setRouteState("idle");
+  }
 
-      <div className="relative px-4 py-3">
+  return (
+    // Fixed to the viewport height, not a minimum, so the map fills what
+    // is left rather than sizing itself and leaving white space below.
+    // dvh rather than vh accounts for the browser's own address bar.
+    <div className="flex h-dvh flex-col overflow-hidden bg-white">
+      <Header resortName={resort.name} />
+
+      <div className="relative shrink-0 px-4 pt-3">
+        <label htmlFor="site-search" className="sr-only">
+          Your site number
+        </label>
         <input
+          id="site-search"
           type="text"
-          inputMode="search"
-          placeholder="Enter your site number..."
+          inputMode="numeric"
+          placeholder="Enter your site number"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -145,10 +154,10 @@ export function RouteMap({
             setRouteState("idle");
           }}
           autoFocus
-          className="w-full rounded-md border border-neutral-300 px-4 py-3 text-base"
+          className="w-full rounded-lg border-2 border-[#702890]/25 px-4 py-3 text-base text-neutral-900 placeholder:text-neutral-400 focus:border-[#702890] focus:outline-none"
         />
         {matches.length > 0 && !selectedSite && (
-          <ul className="absolute inset-x-4 top-full z-10 mt-1 rounded-md border border-neutral-200 bg-white shadow-lg">
+          <ul className="absolute inset-x-4 top-full z-[1000] mt-1 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg">
             {matches.map((site) => (
               <li key={site.id}>
                 <button
@@ -158,9 +167,9 @@ export function RouteMap({
                     setQuery(site.site_number);
                     void loadRoute(site.id);
                   }}
-                  className="flex w-full justify-between px-4 py-3 text-left hover:bg-neutral-50"
+                  className="flex w-full justify-between px-4 py-3 text-left text-neutral-900 hover:bg-[#702890]/5"
                 >
-                  <span className="font-medium">Site {site.site_number}</span>
+                  <span className="font-semibold">Site {site.site_number}</span>
                   {site.label && (
                     <span className="text-sm text-neutral-500">{site.label}</span>
                   )}
@@ -169,33 +178,45 @@ export function RouteMap({
             ))}
           </ul>
         )}
+        {query.trim() !== "" && matches.length === 0 && !selectedSite && (
+          <p className="mt-2 text-sm text-neutral-500">
+            No site {query.trim()} here. Check the number on your paperwork, or
+            ask at reception.
+          </p>
+        )}
       </div>
+
+      {!selectedSite && <Instructions />}
 
       {selectedSite && hasEntrance && (
         <>
-          <div className="px-4 pb-3">
+          <div className="shrink-0 px-4 pt-3">
             {route ? (
-              <p className="text-sm text-neutral-700">
+              <p className="text-[15px] text-neutral-800">
                 Site {selectedSite.site_number} is a{" "}
-                <strong>{formatDistance(route.distanceM)}</strong> walk from the
-                entrance, about{" "}
+                <strong className="text-[#702890]">
+                  {formatDistance(route.distanceM)}
+                </strong>{" "}
+                walk from the entrance, about{" "}
                 {formatWalkTime(estimatedWalkSeconds(route.distanceM))}. Follow
-                the blue line.
+                the purple line.
               </p>
             ) : (
               summary && (
-                <p className="text-sm text-neutral-700">
-                  Site {selectedSite.site_number} is approximately{" "}
-                  <strong>{summary.distance}</strong> {summary.compass} of the
-                  entrance (~{summary.walkTime} walk, straight-line).
+                <p className="text-[15px] text-neutral-800">
+                  Site {selectedSite.site_number} is about{" "}
+                  <strong className="text-[#702890]">{summary.distance}</strong>{" "}
+                  {summary.compass} of the entrance (~{summary.walkTime} walk, in
+                  a straight line).
                   {routeState === "loading" && " Finding the walking route…"}
                 </p>
               )
             )}
           </div>
-          {plan && (
-            <div className="flex gap-1 px-4 pb-2">
-              {(Object.keys(PLAN_VIEWS) as PlanView[]).map((view) => (
+
+          <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 py-2">
+            {plan &&
+              (Object.keys(PLAN_VIEWS) as PlanView[]).map((view) => (
                 <button
                   key={view}
                   type="button"
@@ -203,18 +224,22 @@ export function RouteMap({
                   aria-pressed={planView === view}
                   className={
                     planView === view
-                      ? "rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white"
-                      : "rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700"
+                      ? "rounded-full bg-[#702890] px-3.5 py-1.5 text-sm font-medium text-white"
+                      : "rounded-full border border-neutral-300 px-3.5 py-1.5 text-sm text-neutral-700"
                   }
                 >
                   {PLAN_VIEW_LABELS[view]}
                 </button>
               ))}
-            </div>
-          )}
-          {/* min-h-0 lets this actually shrink: a flex child defaults to
-              min-height:auto, which refuses to go below its content and
-              pushes the map off the bottom of the screen instead. */}
+            <button
+              type="button"
+              onClick={reset}
+              className="ml-auto rounded-full border border-neutral-300 px-3.5 py-1.5 text-sm text-neutral-700"
+            >
+              Another site
+            </button>
+          </div>
+
           <div className="min-h-0 flex-1">
             <LeafletRouteView
               entrance={{ lat: resort.entrance_lat!, lng: resort.entrance_lng! }}
@@ -225,23 +250,75 @@ export function RouteMap({
               plan={plan}
               planImageUrl={planImageUrl}
               planOpacity={PLAN_VIEWS[planView]}
+              bearingDeg={bearingDeg}
+              boundary={boundary}
             />
           </div>
         </>
       )}
 
       {selectedSite && !hasEntrance && (
-        <p className="px-4 text-sm text-amber-600">
-          This resort hasn&apos;t set an entrance/reference point yet, so we
-          can&apos;t show directions.
+        <p className="px-4 py-3 text-sm text-amber-700">
+          This resort hasn&apos;t set an entrance point yet, so we can&apos;t
+          show directions. Please ask at reception.
         </p>
       )}
+    </div>
+  );
+}
 
-      {!selectedSite && (
-        <p className="px-4 text-sm text-neutral-400">
-          Start typing your site number above to see directions.
-        </p>
-      )}
+function Header({ resortName }: { resortName: string }) {
+  return (
+    <header className="shrink-0 border-b-[3px] border-[#702890] px-4 pb-2.5 pt-3">
+      <div className="flex items-center gap-3">
+        <Image
+          src="/brand/providence-lifestyle.png"
+          alt="Providence Lifestyle"
+          width={578}
+          height={289}
+          priority
+          className="h-11 w-auto"
+        />
+        <div className="min-w-0">
+          <p className="truncate font-serif text-[19px] leading-tight text-[#702890]">
+            {resortName} Resort
+          </p>
+          <p className="text-[12px] leading-tight text-neutral-500">
+            Find your home
+          </p>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+// What the page is, and how to use it - shown until a site is picked, so
+// it's there when a guest first scans and out of the way afterwards.
+function Instructions() {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <p className="text-[15px] text-neutral-700">
+        Welcome. This page shows you the way from the entrance to any home in
+        the resort.
+      </p>
+      <ol className="mt-4 flex flex-col gap-3">
+        {[
+          "Type the site number you're looking for in the box above.",
+          "Tap it in the list that appears.",
+          "Follow the purple line on the map from the entrance to the home.",
+        ].map((step, i) => (
+          <li key={step} className="flex gap-3">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#702890] text-[13px] font-semibold text-white">
+              {i + 1}
+            </span>
+            <span className="text-[15px] leading-snug text-neutral-700">{step}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-5 text-[13px] leading-snug text-neutral-500">
+        The map is turned so that walking into the resort is straight up the
+        screen — the way you&apos;re facing at the entrance.
+      </p>
     </div>
   );
 }

@@ -66,6 +66,9 @@ const updateResortSchema = z.object({
   centerLng: z.coerce.number().min(-180).max(180).nullable(),
   defaultZoom: z.coerce.number().int().min(1).max(22),
   totalHomes: z.coerce.number().int().min(1).max(5000).nullable(),
+  // Null means "work it out from the entrance", which is what almost
+  // every resort should use.
+  mapBearingDeg: z.coerce.number().min(0).max(360).nullable(),
 });
 
 export interface ResortSaveState {
@@ -85,6 +88,7 @@ export async function updateResort(
   const rawLat = formData.get("centerLat");
   const rawLng = formData.get("centerLng");
   const rawTotalHomes = formData.get("totalHomes");
+  const rawBearing = formData.get("mapBearingDeg");
 
   const parsed = updateResortSchema.safeParse({
     resortId: formData.get("resortId"),
@@ -95,6 +99,9 @@ export async function updateResort(
     centerLng: rawLng ? rawLng : null,
     defaultZoom: formData.get("defaultZoom") || 19,
     totalHomes: rawTotalHomes ? rawTotalHomes : null,
+    // An empty box means automatic; "0" is a real bearing (due north)
+    // and must survive, which a plain truthiness check would eat.
+    mapBearingDeg: rawBearing !== null && String(rawBearing).trim() !== "" ? rawBearing : null,
   });
 
   // Returned rather than thrown: a validation mistake belongs next to the
@@ -118,6 +125,7 @@ export async function updateResort(
       is_published: parsed.data.isPublished,
       default_zoom: parsed.data.defaultZoom,
       total_homes: parsed.data.totalHomes,
+      map_bearing_deg: parsed.data.mapBearingDeg,
       center,
     })
     .eq("id", parsed.data.resortId);

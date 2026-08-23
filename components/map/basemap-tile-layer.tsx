@@ -14,7 +14,18 @@ const OSM_ATTRIBUTION =
 // Satellite is the default because resort internal paths/buildings are
 // visible there; OSM street tiles show almost nothing useful inside a
 // private resort but help orient visitors to the surrounding area.
-export function BasemapTileLayer() {
+export function BasemapTileLayer({
+  /** The visitor map turns the whole container, which would take the
+   *  layer switcher with it and leave it lying on its side; that page
+   *  draws its own controls outside the rotation instead. */
+  withControl = true,
+}: {
+  withControl?: boolean;
+} = {}) {
+  if (!withControl) {
+    return <TileLayer url={ESRI_IMAGERY_URL} attribution={ESRI_ATTRIBUTION} maxZoom={20} />;
+  }
+
   return (
     <LayersControl position="topright">
       <LayersControl.BaseLayer checked name="Satellite">

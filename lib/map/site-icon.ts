@@ -114,16 +114,34 @@ function buildSiteDivIcon(status: SiteStatus, highlighted: boolean) {
 // a resort gate on whatever signal they have, and a third party being
 // slow or blocked shouldn't leave them with a line and no idea which end
 // is their house. It also lets the pins say what they are.
-export function routeEndpointIcon(kind: "entrance" | "site", label: string) {
-  return cachedIcon(`route|${kind}|${label}`, () => buildRouteEndpointIcon(kind, label));
+export function routeEndpointIcon(
+  kind: "entrance" | "site",
+  label: string,
+  /** How far the map itself has been turned. The pin is counter-turned
+   *  by the same amount so the words stay the right way up - a rotated
+   *  map with sideways labels is harder to read than no rotation at
+   *  all. */
+  mapBearingDeg = 0
+) {
+  return cachedIcon(`route|${kind}|${label}|${mapBearingDeg}`, () =>
+    buildRouteEndpointIcon(kind, label, mapBearingDeg)
+  );
 }
 
-function buildRouteEndpointIcon(kind: "entrance" | "site", label: string) {
-  const color = kind === "entrance" ? "#7c3aed" : "#15803d";
+function buildRouteEndpointIcon(
+  kind: "entrance" | "site",
+  label: string,
+  mapBearingDeg: number
+) {
+  const color = kind === "entrance" ? "#702890" : "#15803d";
   const safeLabel = label.replace(/[<>&"]/g, "");
+  const upright =
+    mapBearingDeg === 0
+      ? ""
+      : `transform:rotate(${mapBearingDeg}deg);transform-origin:9px 9px;`;
   return L.divIcon({
     className: "",
-    html: `<span style="display:flex;align-items:center;gap:4px;white-space:nowrap;">
+    html: `<span style="display:flex;align-items:center;gap:4px;white-space:nowrap;${upright}">
       <span style="
         display:block;
         width:18px;

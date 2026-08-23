@@ -21,7 +21,7 @@ export default async function ResortDetailPage({
   const { data: resort } = await supabase
     .from("resorts")
     .select(
-      "id, name, slug, is_published, default_zoom, total_homes, center_lat, center_lng"
+      "id, name, slug, is_published, default_zoom, total_homes, center_lat, center_lng, map_bearing_deg"
     )
     .eq("id", resortId)
     .single();
@@ -121,6 +121,7 @@ export default async function ResortDetailPage({
           defaultIsPublished={resort.is_published}
           defaultZoom={resort.default_zoom}
           totalHomes={resort.total_homes}
+          mapBearingDeg={resort.map_bearing_deg}
           centerLat={resort.center_lat}
           centerLng={resort.center_lng}
           updateResort={updateResort}
