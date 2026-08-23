@@ -93,7 +93,10 @@ export function LeafletRouteView({
   // does the panning instead. Zooming is pinned to the centre for the
   // same reason.
   const panTarget: PanTarget | null = map
-    ? { panBy: (dx, dy) => map.panBy([dx, dy], { animate: false }) }
+    ? {
+        panBy: (dx, dy) => map.panBy([dx, dy], { animate: false }),
+        invalidateSize: () => map.invalidateSize({ animate: false }),
+      }
     : null;
 
   const inner = (fitPadding: number) => (
