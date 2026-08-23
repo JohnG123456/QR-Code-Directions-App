@@ -18,6 +18,18 @@ export interface NetworkActionState {
   edgeId?: string;
 }
 
+export interface SplitEdgeResult {
+  error?: string;
+  /** The junction to join onto: newly made, or the one that was already
+   *  at that end of the road. */
+  nodeId?: string;
+  /** False when the click was effectively at an end already and no road
+   *  was divided, in which case the two ids below are absent. */
+  split?: boolean;
+  firstEdgeId?: string;
+  secondEdgeId?: string;
+}
+
 const latLngSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
@@ -180,6 +192,60 @@ export async function deleteGraphEdge(
   if (error) return { error: error.message };
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/network`);
   return {};
+}
+
+const splitEdgeSchema = z.object({
+  resortId: z.string().uuid(),
+  edgeId: z.string().uuid(),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+});
+
+// Joins onto a road part-way along it, rather than only at its ends.
+//
+// Everything happens inside one database function: a junction appears on
+// the line, the road becomes two roads meeting there, and the original
+// goes. Splitting from the client instead would leave windows where the
+// graph is briefly broken, and a broken graph doesn't announce itself -
+// it shows up weeks later as a route that fails.
+export async function splitGraphEdge(
+  input: z.infer<typeof splitEdgeSchema>
+): Promise<SplitEdgeResult> {
+  const parsed = splitEdgeSchema.safeParse(input);
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid road" };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("split_graph_edge", {
+    p_edge_id: parsed.data.edgeId,
+    p_lat: parsed.data.lat,
+    p_lng: parsed.data.lng,
+  });
+
+  if (error) {
+    // The function isn't there until 0006 has been run, and "function
+    // not found" is not something anyone can act on as written.
+    const missing = error.code === "42883" || error.code === "PGRST202";
+    return {
+      error: missing
+        ? "Joining onto a road needs a database update that hasn't been run yet — run supabase/migrations/0006_split_graph_edge.sql in Supabase."
+        : error.message,
+    };
+  }
+  const result = data as {
+    node_id?: string;
+    split?: boolean;
+    first_edge_id?: string;
+    second_edge_id?: string;
+  } | null;
+  if (!result?.node_id) return { error: "Couldn't join onto that road." };
+
+  revalidatePath(`/admin/resorts/${parsed.data.resortId}/network`);
+  return {
+    nodeId: result.node_id,
+    split: result.split ?? false,
+    firstEdgeId: result.first_edge_id,
+    secondEdgeId: result.second_edge_id,
+  };
 }
 
 const setEntranceSchema = z.object({

@@ -12,6 +12,7 @@ import {
   deleteGraphEdge,
   setEntranceNode,
   clearEntranceNode,
+  splitGraphEdge,
   connectSitesToNetwork,
 } from "./actions";
 
@@ -160,6 +161,7 @@ export default async function NetworkPage({
         deleteGraphEdge={deleteGraphEdge}
         setEntranceNode={setEntranceNode}
         clearEntranceNode={clearEntranceNode}
+        splitGraphEdge={splitGraphEdge}
       />
 
       <ConnectSitesPanel
