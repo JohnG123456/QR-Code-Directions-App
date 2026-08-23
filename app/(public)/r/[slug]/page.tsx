@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { fetchPublicPlanPlacement } from "@/lib/masterplan/published-overlay";
 import { RouteMap } from "./route-map";
 
 // Anything that goes wrong here used to end up as the same bare 404.
@@ -75,7 +76,23 @@ export default async function VisitorResortPage({
     );
   }
 
-  return <RouteMap resort={resort} sites={sites ?? []} />;
+  // The plan drawing, if staff have published one. Only its placement is
+  // read here - a handful of numbers; the image comes down as its own
+  // cacheable request from /api/r/<slug>/plan.
+  const plan = await fetchPublicPlanPlacement(supabase, resort.id);
+
+  return (
+    <RouteMap
+      resort={resort}
+      sites={sites ?? []}
+      plan={plan}
+      planImageUrl={
+        plan
+          ? `/api/r/${encodeURIComponent(slug)}/plan?v=${encodeURIComponent(plan.publishedAt)}`
+          : null
+      }
+    />
+  );
 }
 
 function VisitorMessage({

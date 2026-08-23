@@ -11,11 +11,34 @@ import {
   formatWalkTime,
 } from "@/lib/geo/distance";
 import type { PublicResort, PublicSite } from "@/lib/types";
+import type { PlanOverlayPlacement } from "@/lib/masterplan/published-overlay";
 
 interface RouteResult {
   distanceM: number;
   points: [number, number][];
 }
+
+// How much of the plan drawing is shown, per view.
+//
+// "Both" is the default because it is the view that actually answers the
+// visitor's question: the plan carries the site numbers and street names,
+// the imagery underneath it says which of those buildings exist yet and
+// what the place looks like when you're standing in it. Satellite alone
+// is rows of identical roofs; the plan alone loses the landmarks people
+// steer by.
+const PLAN_VIEWS = {
+  both: 0.65,
+  plan: 1,
+  satellite: 0,
+} as const;
+
+type PlanView = keyof typeof PLAN_VIEWS;
+
+const PLAN_VIEW_LABELS: Record<PlanView, string> = {
+  both: "Both",
+  plan: "Site plan",
+  satellite: "Satellite",
+};
 
 // react-leaflet touches `window`/`document` at import time, so the map
 // itself must be excluded from the server render.
@@ -27,14 +50,20 @@ const LeafletRouteView = dynamic(
 export function RouteMap({
   resort,
   sites,
+  plan,
+  planImageUrl,
 }: {
   resort: PublicResort;
   sites: PublicSite[];
+  /** The published master plan, when this resort has one. */
+  plan: PlanOverlayPlacement | null;
+  planImageUrl: string | null;
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [routeState, setRouteState] = useState<"idle" | "loading" | "done">("idle");
+  const [planView, setPlanView] = useState<PlanView>("both");
 
   const matches = useMemo(() => {
     if (!query.trim()) return [];
@@ -89,7 +118,15 @@ export function RouteMap({
       : null;
 
   return (
-    <div className="flex min-h-screen flex-col">
+    // Fixed to the viewport height, not a minimum.
+    //
+    // `min-h-screen` only guarantees the page is *at least* a screen
+    // tall, which leaves the map sized by its own content - a 384px band
+    // with a slab of dead white space under it on a phone. `h-dvh` gives
+    // the column a definite height for the map to fill, and dvh rather
+    // than vh so it accounts for the browser's own address bar instead
+    // of hiding the bottom of the map behind it.
+    <div className="flex h-dvh flex-col overflow-hidden">
       <header className="border-b border-neutral-200 px-4 py-4">
         <h1 className="text-lg font-semibold">{resort.name}</h1>
         <p className="text-sm text-neutral-500">Find your site</p>
@@ -156,13 +193,38 @@ export function RouteMap({
               )
             )}
           </div>
-          <div className="flex-1">
+          {plan && (
+            <div className="flex gap-1 px-4 pb-2">
+              {(Object.keys(PLAN_VIEWS) as PlanView[]).map((view) => (
+                <button
+                  key={view}
+                  type="button"
+                  onClick={() => setPlanView(view)}
+                  aria-pressed={planView === view}
+                  className={
+                    planView === view
+                      ? "rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white"
+                      : "rounded-md border border-neutral-300 px-3 py-1.5 text-sm text-neutral-700"
+                  }
+                >
+                  {PLAN_VIEW_LABELS[view]}
+                </button>
+              ))}
+            </div>
+          )}
+          {/* min-h-0 lets this actually shrink: a flex child defaults to
+              min-height:auto, which refuses to go below its content and
+              pushes the map off the bottom of the screen instead. */}
+          <div className="min-h-0 flex-1">
             <LeafletRouteView
               entrance={{ lat: resort.entrance_lat!, lng: resort.entrance_lng! }}
               site={{ lat: selectedSite.lat!, lng: selectedSite.lng! }}
               zoom={resort.default_zoom}
               routePoints={route?.points ?? null}
               siteLabel={`Site ${selectedSite.site_number}`}
+              plan={plan}
+              planImageUrl={planImageUrl}
+              planOpacity={PLAN_VIEWS[planView]}
             />
           </div>
         </>

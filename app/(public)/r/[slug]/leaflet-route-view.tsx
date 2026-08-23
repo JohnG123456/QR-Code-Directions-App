@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { MapContainer, Marker, Polyline, useMap } from "react-leaflet";
 import { routeEndpointIcon } from "@/lib/map/site-icon";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
+import { PlanImageOverlay } from "@/components/map/plan-image-overlay";
+import type { PlanOverlayPlacement } from "@/lib/masterplan/published-overlay";
 import type { LatLng } from "@/lib/geo/distance";
 import "leaflet/dist/leaflet.css";
 
@@ -29,6 +31,9 @@ export function LeafletRouteView({
   zoom,
   routePoints,
   siteLabel,
+  plan,
+  planImageUrl,
+  planOpacity,
 }: {
   entrance: LatLng;
   site: LatLng;
@@ -37,6 +42,13 @@ export function LeafletRouteView({
   /** The walk along the resort's own roads, when there is one. Null
    *  falls back to the dashed straight line. */
   routePoints: [number, number][] | null;
+  /** Where the published master plan sits in the world, when there is
+   *  one. Null means satellite imagery alone. */
+  plan: PlanOverlayPlacement | null;
+  planImageUrl: string | null;
+  /** 0 hides the plan without unmounting it, so toggling back doesn't
+   *  re-download the image. */
+  planOpacity: number;
 }) {
   const entrancePos: [number, number] = [entrance.lat, entrance.lng];
   const sitePos: [number, number] = [site.lat, site.lng];
@@ -46,8 +58,21 @@ export function LeafletRouteView({
   const bounds = routePoints && routePoints.length > 1 ? routePoints : [entrancePos, sitePos];
 
   return (
-    <MapContainer center={sitePos} zoom={zoom} className="h-full min-h-96 w-full">
+    // Fills whatever the page gives it, with no minimum of its own - the
+    // page is what decides how tall the map should be.
+    <MapContainer center={sitePos} zoom={zoom} className="h-full w-full">
       <BasemapTileLayer />
+      {plan && planImageUrl && (
+        <PlanImageOverlay
+          imageUrl={planImageUrl}
+          imageWidth={plan.imageWidth}
+          imageHeight={plan.imageHeight}
+          topLeft={plan.topLeft}
+          topRight={plan.topRight}
+          bottomLeft={plan.bottomLeft}
+          opacity={planOpacity}
+        />
+      )}
       <Marker position={entrancePos} icon={routeEndpointIcon("entrance", "Entrance")} />
       <Marker position={sitePos} icon={routeEndpointIcon("site", siteLabel)} />
       {routePoints && routePoints.length > 1 ? (
