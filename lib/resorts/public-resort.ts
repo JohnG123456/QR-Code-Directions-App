@@ -49,3 +49,32 @@ export async function fetchMapBearingOverride(
     return null;
   }
 }
+
+/**
+ * The angle the resort's streets run at, worked out by the database.
+ *
+ * The road network itself is not readable by visitors and shouldn't be;
+ * this asks for the one number the map needs and gets nothing else.
+ * Null whenever it can't be had - no roads traced, the migration not
+ * run - and the map falls back to squaring up on the homes instead.
+ */
+export async function fetchRoadGridDegrees(
+  supabase: SupabaseClient,
+  resortId: string
+): Promise<number | null> {
+  try {
+    const { data, error } = await supabase.rpc("resort_road_grid_deg", {
+      p_resort_id: resortId,
+    });
+    if (error) {
+      const missing = error.code === "42883" || error.code === "PGRST202";
+      if (!missing) {
+        console.error("[visitor] couldn't read the street grid:", error.message, error.code);
+      }
+      return null;
+    }
+    return typeof data === "number" && Number.isFinite(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
