@@ -11,15 +11,57 @@ import { distanceMeters, formatDistance } from "@/lib/geo/distance";
 import { loadMasterplanDraft } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/import-masterplan/actions";
 import type { PointPair } from "@/lib/geo/similarity-transform";
 import type { SiteStatus } from "@/lib/types";
-import type { NetworkActionState } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/network/actions";
+import type {
+  NetworkActionState,
+  SplitEdgeResult,
+} from "@/app/(admin)/admin/(protected)/resorts/[resortId]/network/actions";
 import { countConnectedToEntrance } from "@/lib/network/connectivity";
+import { closestPointOnPolyline, splitShapeAt, type Pt } from "@/lib/network/snap";
 import "leaflet/dist/leaflet.css";
 
 // Snapping radius in screen pixels. Generous on purpose: joining a new
 // road to an existing junction is the single most common action, and a
 // junction that looks joined but isn't is the failure mode that quietly
 // breaks routing later.
-const SNAP_PIXELS = 16;
+//
+// Judged on screen rather than in metres so it behaves the same at every
+// zoom, and sized for a fingertip rather than a mouse pointer - these
+// resorts get traced on a laptop trackpad as often as a mouse.
+const SNAP_PIXELS = 24;
+
+// A junction's dot is small so a traced network stays readable at low
+// zoom, but a 11px target is close to unhittable. The icon is padded out
+// with transparent space to give it a real target without making the
+// drawing heavier.
+const NODE_HIT_PADDING = 10;
+
+// Marks the exact point on a road that the next click would join onto.
+// Hollow rather than solid so it reads as "this is about to happen"
+// rather than "there is a junction here already".
+let roadSnapIconCache: L.DivIcon | null = null;
+function roadSnapIcon() {
+  if (roadSnapIconCache) return roadSnapIconCache;
+  roadSnapIconCache = L.divIcon({
+    className: "",
+    html: `<span style="
+      display:block;width:18px;height:18px;border-radius:9999px;
+      border:2px solid #2563eb;background:rgba(37,99,235,0.25);
+      box-shadow:0 0 0 2px rgba(255,255,255,0.9);
+    "></span>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+  });
+  return roadSnapIconCache;
+}
+
+// Ids for things that exist on the map but not yet in the database.
+//
+// A tap has to appear instantly - waiting for a round trip before
+// drawing anything is what made the editor feel broken - so the junction
+// is given a placeholder id and drawn straight away, and the real id
+// replaces it everywhere when the insert answers.
+const TEMP_PREFIX = "temp-";
+const isTempId = (id: string) => id.startsWith(TEMP_PREFIX);
 
 interface GraphNode {
   id: string;
@@ -46,6 +88,13 @@ interface SiteMarker {
 }
 
 type Mode = "draw" | "edit";
+
+// What a click will join onto. A junction is the simple case; a road
+// means the road gets divided at that point so the join is real, rather
+// than a new junction dropped beside it that looks connected and isn't.
+type SnapTarget =
+  | { kind: "node"; nodeId: string; lat: number; lng: number }
+  | { kind: "edge"; edgeId: string; lat: number; lng: number; index: number };
 
 // One entry per thing you did, not per thing the database did.
 //
@@ -167,27 +216,55 @@ export function remapUndoStack(stack: UndoStep[], idMap: Map<string, string>): U
 // open on it. See lib/map/site-icon.ts.
 const nodeIconCache = new Map<string, L.DivIcon>();
 
-function nodeIcon(isEntrance: boolean, isSelected: boolean, isChainHead: boolean) {
-  const key = `${isEntrance}|${isSelected}|${isChainHead}`;
+function nodeIcon(
+  isEntrance: boolean,
+  isSelected: boolean,
+  isChainHead: boolean,
+  isSnapTarget: boolean
+) {
+  const key = `${isEntrance}|${isSelected}|${isChainHead}|${isSnapTarget}`;
   const cached = nodeIconCache.get(key);
   if (cached) return cached;
-  const icon = buildNodeIcon(isEntrance, isSelected, isChainHead);
+  const icon = buildNodeIcon(isEntrance, isSelected, isChainHead, isSnapTarget);
   nodeIconCache.set(key, icon);
   return icon;
 }
 
-function buildNodeIcon(isEntrance: boolean, isSelected: boolean, isChainHead: boolean) {
-  const size = isEntrance || isSelected || isChainHead ? 16 : 11;
+function buildNodeIcon(
+  isEntrance: boolean,
+  isSelected: boolean,
+  isChainHead: boolean,
+  isSnapTarget: boolean
+) {
+  const dot = isEntrance || isSelected || isChainHead ? 16 : 11;
   const color = isEntrance ? "#7c3aed" : isChainHead ? "#2563eb" : "#111827";
+  // The box is bigger than the dot: the transparent margin is what your
+  // finger actually hits, and it's what makes a junction selectable
+  // without drawing a target the size of a house on the map.
+  const box = dot + NODE_HIT_PADDING * 2;
+  // A ring, drawn only while this is what the next click will join onto,
+  // so snapping is something you can see coming rather than discover
+  // afterwards.
+  const ring = isSnapTarget
+    ? `<span style="
+        position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        width:${dot + 16}px;height:${dot + 16}px;border-radius:9999px;
+        border:2px solid #2563eb;background:rgba(37,99,235,0.18);
+      "></span>`
+    : "";
+
   return L.divIcon({
     className: "",
     html: `<span style="
-      display:block;width:${size}px;height:${size}px;border-radius:9999px;
+      display:block;position:relative;width:${box}px;height:${box}px;
+    ">${ring}<span style="
+      position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+      width:${dot}px;height:${dot}px;border-radius:9999px;
       background:${color};border:2px solid white;
       box-shadow:0 1px 3px rgba(0,0,0,0.5);
-    "></span>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+    "></span></span>`,
+    iconSize: [box, box],
+    iconAnchor: [box / 2, box / 2],
   });
 }
 
@@ -210,6 +287,7 @@ export function NetworkEditor({
   deleteGraphEdge,
   setEntranceNode,
   clearEntranceNode,
+  splitGraphEdge,
 }: {
   resortId: string;
   centerLat: number;
@@ -259,6 +337,12 @@ export function NetworkEditor({
     nodeId: string;
   }) => Promise<NetworkActionState>;
   clearEntranceNode: (input: { resortId: string }) => Promise<NetworkActionState>;
+  splitGraphEdge: (input: {
+    resortId: string;
+    edgeId: string;
+    lat: number;
+    lng: number;
+  }) => Promise<SplitEdgeResult>;
 }) {
   const [nodes, setNodes] = useState<GraphNode[]>(initialNodes);
   const [edges, setEdges] = useState<GraphEdge[]>(initialEdges);
@@ -267,10 +351,73 @@ export function NetworkEditor({
   const [chainNodeId, setChainNodeId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [undoStack, setUndoStack] = useState<UndoStep[]>([]);
   const [undoNote, setUndoNote] = useState<string | null>(null);
+  /** How many writes are still in flight. Shown, never used to block
+   *  input - blocking input on the network is what made this editor feel
+   *  broken in the first place. */
+  const [inFlight, setInFlight] = useState(0);
+  /** What the next click would join onto, so it can be drawn. */
+  const [snapPreview, setSnapPreview] = useState<SnapTarget | null>(null);
+
+  // Placeholder ids handed out to things drawn before the database has
+  // answered, and the map from those to the real ids once it has.
+  const tempSeqRef = useRef(0);
+  const idMapRef = useRef(new Map<string, string>());
+  // Writes run one after another: a road can only be inserted once both
+  // of its junctions actually exist, so ordering is the whole point.
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+
+  const newTempId = () => `${TEMP_PREFIX}${++tempSeqRef.current}`;
+
+  /** Follows placeholder ids through to whatever the database called the
+   *  row in the end. Chained because a row restored by undo is remapped
+   *  a second time. */
+  function resolveId(id: string): string {
+    let current = id;
+    for (let hops = 0; hops < 8; hops++) {
+      const next = idMapRef.current.get(current);
+      if (!next || next === current) break;
+      current = next;
+    }
+    return current;
+  }
+
+  /** Swaps one set of ids for another everywhere they can be held.
+   *  Missing one of these is how a junction ends up unreachable by every
+   *  later action while still sitting on the map. */
+  function applyIdMapping(mapping: Map<string, string>) {
+    if (mapping.size === 0) return;
+    for (const [from, to] of mapping) idMapRef.current.set(from, to);
+    const to = (id: string) => mapping.get(id) ?? id;
+    const toMaybe = (id: string | null) => (id === null ? null : to(id));
+
+    setNodes((prev) => prev.map((n) => (mapping.has(n.id) ? { ...n, id: to(n.id) } : n)));
+    setEdges((prev) =>
+      prev.map((e) => ({
+        ...e,
+        id: to(e.id),
+        fromNodeId: to(e.fromNodeId),
+        toNodeId: to(e.toNodeId),
+      }))
+    );
+    setChainNodeId(toMaybe);
+    setEntranceId(toMaybe);
+    setSelectedNodeId(toMaybe);
+    setSelectedEdgeId(toMaybe);
+    setUndoStack((prev) => remapUndoStack(prev, mapping));
+  }
+
+  /** Runs a write after everything queued before it, without holding up
+   *  the map. */
+  function enqueue(task: () => Promise<void>) {
+    setInFlight((n) => n + 1);
+    queueRef.current = queueRef.current
+      .then(task)
+      .catch(() => setError("That didn't save — check your connection and try again."))
+      .finally(() => setInFlight((n) => n - 1));
+  }
 
   const [showPlan, setShowPlan] = useState(false);
   const [planOpacity, setPlanOpacity] = useState(0.65);
@@ -324,86 +471,197 @@ export function NetworkEditor({
     [nodes, edges, entranceId]
   );
 
-  async function run<T extends NetworkActionState>(fn: () => Promise<T>): Promise<T | null> {
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await fn();
-      if (result.error) {
-        setError(result.error);
-        return null;
-      }
-      return result;
-    } catch {
-      setError("That didn't save — check your connection and try again.");
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function pushUndo(step: UndoStep) {
     setUndoNote(null);
     setUndoStack((prev) => [...prev, step].slice(-UNDO_LIMIT));
   }
 
-  // Extends the road being drawn: snap to an existing junction if one is
-  // close, otherwise drop a new one, then join it to the previous point.
-  async function extendChain(lat: number, lng: number, snappedNodeId: string | null) {
-    let nodeId = snappedNodeId;
+  // Extends the road being drawn.
+  //
+  // Everything here happens on the map first and in the database second.
+  // The old version awaited each insert before drawing anything and
+  // ignored clicks while it waited, so tapping along a street at a
+  // normal pace lost most of the taps to a window nothing told you
+  // about. Now a tap always lands: the junction appears under your
+  // finger with a placeholder id, the writes queue up behind it, and the
+  // real ids replace the placeholders as they come back.
+  function extendChain(lat: number, lng: number, snap: SnapTarget | null) {
     const chainBefore = chainNodeId;
-    // A tap that lands on empty ground creates the junction; one that
-    // snaps onto an existing junction creates only the road. Which of
-    // those happened decides what undoing the tap has to take back.
-    let createdNodeId: string | null = null;
 
-    if (!nodeId) {
-      const created = await run(() => addGraphNode({ resortId, lat, lng }));
-      if (!created?.nodeId) return;
-      nodeId = created.nodeId;
-      createdNodeId = created.nodeId;
-      setNodes((prev) => [...prev, { id: nodeId!, lat, lng, node_type: "intersection" }]);
+    // Where the road is being joined on, in one of three ways: onto an
+    // existing junction, part-way along an existing road (which splits
+    // it), or onto empty ground.
+    let targetNodeId: string;
+    let createdNodeId: string | null = null;
+    let splitEdgeId: string | null = null;
+    // Kept so the optimistic split can be reconciled - or put back, if
+    // the database decides no split was needed after all.
+    let splitHalfIds: [string, string] | null = null;
+    let originalSplitEdge: GraphEdge | null = null;
+
+    if (snap?.kind === "node") {
+      targetNodeId = snap.nodeId;
+    } else if (snap?.kind === "edge") {
+      // Draw the split immediately: the road becomes two roads meeting
+      // at a new junction. The database redoes this properly and the
+      // ids are swapped in when it answers.
+      const tempNodeId = newTempId();
+      targetNodeId = tempNodeId;
+      createdNodeId = tempNodeId;
+      splitEdgeId = snap.edgeId;
+
+      const original = edges.find((e) => e.id === snap.edgeId);
+      originalSplitEdge = original ?? null;
+      setNodes((prev) => [
+        ...prev,
+        { id: tempNodeId, lat: snap.lat, lng: snap.lng, node_type: "intersection" },
+      ]);
+      if (original) {
+        const [firstHalf, secondHalf] = splitShapeAt(original.shape, snap.index, [
+          snap.lat,
+          snap.lng,
+        ]);
+        const firstId = newTempId();
+        const secondId = newTempId();
+        splitHalfIds = [firstId, secondId];
+        setEdges((prev) => [
+          ...prev.filter((e) => e.id !== original.id),
+          {
+            id: firstId,
+            fromNodeId: original.fromNodeId,
+            toNodeId: tempNodeId,
+            pathType: original.pathType,
+            lengthM: null,
+            shape: firstHalf,
+          },
+          {
+            id: secondId,
+            fromNodeId: tempNodeId,
+            toNodeId: original.toNodeId,
+            pathType: original.pathType,
+            lengthM: null,
+            shape: secondHalf,
+          },
+        ]);
+      }
+    } else {
+      const tempNodeId = newTempId();
+      targetNodeId = tempNodeId;
+      createdNodeId = tempNodeId;
+      setNodes((prev) => [
+        ...prev,
+        { id: tempNodeId, lat, lng, node_type: "intersection" },
+      ]);
     }
 
+    // The stretch of road from the last point to this one.
     let createdEdgeId: string | null = null;
-    const from = chainBefore;
-    if (from && from !== nodeId) {
-      const fromNode = nodes.find((n) => n.id === from);
-      const created = await run(() =>
-        addGraphEdge({ resortId, fromNodeId: from, toNodeId: nodeId!, shape: [] })
-      );
-      if (created?.edgeId && fromNode) {
-        createdEdgeId = created.edgeId;
-        const lengthM = distanceMeters(fromNode, { lat, lng });
+    if (chainBefore && chainBefore !== targetNodeId) {
+      const fromNode = nodes.find((n) => n.id === chainBefore);
+      if (fromNode) {
+        createdEdgeId = newTempId();
+        const to = snap?.kind === "edge" ? { lat: snap.lat, lng: snap.lng } : { lat, lng };
         setEdges((prev) => [
           ...prev,
           {
-            id: created.edgeId!,
-            fromNodeId: from,
-            toNodeId: nodeId!,
+            id: createdEdgeId!,
+            fromNodeId: chainBefore,
+            toNodeId: targetNodeId,
             pathType: "road",
-            lengthM,
+            lengthM: distanceMeters(fromNode, to),
             shape: [
               [fromNode.lat, fromNode.lng],
-              [lat, lng],
+              [to.lat, to.lng],
             ],
           },
         ]);
       }
     }
 
-    // One tap, one undo step. Deleting the junction cascades to the road
-    // drawn with it, so the junction step covers both.
+    // One tap, one undo step - the junction covers the road drawn with
+    // it, because deleting a junction takes its roads too.
     if (createdNodeId) {
       pushUndo({ kind: "add-node", nodeId: createdNodeId, chainNodeIdBefore: chainBefore });
     } else if (createdEdgeId) {
       pushUndo({ kind: "add-edge", edgeId: createdEdgeId, chainNodeIdBefore: chainBefore });
     }
 
-    setChainNodeId(nodeId);
+    setChainNodeId(targetNodeId);
+    setSnapPreview(null);
+
+    const nodeIdToCreate = createdNodeId;
+    const edgeIdToCreate = createdEdgeId;
+    const splitFrom = splitEdgeId;
+
+    enqueue(async () => {
+      let realTargetId = resolveId(targetNodeId);
+
+      if (splitFrom && nodeIdToCreate) {
+        // Splitting replaces one road with two and hands back the
+        // junction between them - or, if the click was effectively at an
+        // end already, the junction that was there all along.
+        const result = await splitGraphEdge({
+          resortId,
+          edgeId: resolveId(splitFrom),
+          lat,
+          lng,
+        });
+        if (!result.nodeId) {
+          setError(result.error ?? "Couldn't join onto that road.");
+          return;
+        }
+        realTargetId = result.nodeId;
+        const mapping = new Map([[nodeIdToCreate, result.nodeId]]);
+        // The two halves were drawn under placeholder ids; the database
+        // returns what it called them, in the same order.
+        if (result.split && result.firstEdgeId && result.secondEdgeId && splitHalfIds) {
+          mapping.set(splitHalfIds[0], result.firstEdgeId);
+          mapping.set(splitHalfIds[1], result.secondEdgeId);
+        } else if (!result.split && splitHalfIds) {
+          // The click was at an end after all: no road was divided, so
+          // the halves drawn a moment ago aren't real. Put the original
+          // back rather than leave two invented roads on the map.
+          setEdges((prev) => {
+            const without = prev.filter(
+              (e) => e.id !== splitHalfIds[0] && e.id !== splitHalfIds[1]
+            );
+            return originalSplitEdge ? [...without, originalSplitEdge] : without;
+          });
+          setNodes((prev) => prev.filter((n) => n.id !== nodeIdToCreate));
+        }
+        applyIdMapping(mapping);
+      } else if (nodeIdToCreate) {
+        const created = await addGraphNode({ resortId, lat, lng });
+        if (!created.nodeId) {
+          setError(created.error ?? "That junction didn't save.");
+          return;
+        }
+        realTargetId = created.nodeId;
+        applyIdMapping(new Map([[nodeIdToCreate, created.nodeId]]));
+      }
+
+      if (edgeIdToCreate && chainBefore) {
+        const realFrom = resolveId(chainBefore);
+        if (isTempId(realFrom) || isTempId(realTargetId)) {
+          setError("A road couldn't be saved because one of its ends didn't save.");
+          return;
+        }
+        const created = await addGraphEdge({
+          resortId,
+          fromNodeId: realFrom,
+          toNodeId: realTargetId,
+          shape: [],
+        });
+        if (!created.edgeId) {
+          setError(created.error ?? "That road didn't save.");
+          return;
+        }
+        applyIdMapping(new Map([[edgeIdToCreate, created.edgeId]]));
+      }
+    });
   }
 
-  async function handleDeleteNode(nodeId: string) {
+  function handleDeleteNode(nodeId: string) {
     const attached = edges.filter((e) => e.fromNodeId === nodeId || e.toNodeId === nodeId);
     if (
       attached.length > 0 &&
@@ -420,8 +678,9 @@ export function NetworkEditor({
     const node = nodes.find((n) => n.id === nodeId);
     const wasEntrance = entranceId === nodeId;
 
-    const ok = await run(() => deleteGraphNode({ resortId, nodeId }));
-    if (!ok) return;
+    // Off the map first, out of the database second - the same way a
+    // tap works. Waiting on the round trip before removing anything is
+    // what made every action feel like it might not have registered.
     setEdges((prev) => prev.filter((e) => e.fromNodeId !== nodeId && e.toNodeId !== nodeId));
     setNodes((prev) => prev.filter((n) => n.id !== nodeId));
     if (chainNodeId === nodeId) setChainNodeId(null);
@@ -430,12 +689,19 @@ export function NetworkEditor({
     if (node) {
       pushUndo({ kind: "delete-node", node, attachedEdges: attached, wasEntrance });
     }
+
+    enqueue(async () => {
+      const realId = resolveId(nodeId);
+      // Still a placeholder means the insert never landed, so there is
+      // nothing in the database to delete.
+      if (isTempId(realId)) return;
+      const result = await deleteGraphNode({ resortId, nodeId: realId });
+      if (result.error) setError(result.error);
+    });
   }
 
-  async function handleNodeMoved(nodeId: string, lat: number, lng: number) {
+  function handleNodeMoved(nodeId: string, lat: number, lng: number) {
     const before = nodes.find((n) => n.id === nodeId);
-    const ok = await run(() => moveGraphNode({ resortId, nodeId, lat, lng }));
-    if (!ok) return;
     if (before && (before.lat !== lat || before.lng !== lng)) {
       pushUndo({ kind: "move-node", nodeId, from: { lat: before.lat, lng: before.lng } });
     }
@@ -451,16 +717,32 @@ export function NetworkEditor({
         return { ...edge, shape };
       })
     );
+
+    enqueue(async () => {
+      const realId = resolveId(nodeId);
+      if (isTempId(realId)) {
+        setError("That junction hasn't finished saving, so the move didn't stick.");
+        return;
+      }
+      const result = await moveGraphNode({ resortId, nodeId: realId, lat, lng });
+      if (result.error) setError(result.error);
+    });
   }
 
 
   // Takes back the last thing you did, by doing its opposite against the
-  // database. Nothing is queued locally: the network on screen and the
-  // network stored are the same thing at every point, including
-  // mid-undo, so closing the page never leaves half a change behind.
-  async function undoLast() {
+  // database.
+  //
+  // Like every other action here, the map changes first and the write
+  // follows in the queue. That matters more than it looks: undo is
+  // usually pressed straight after the mistake, often before the
+  // mistake's own insert has come back, so the ids the step was recorded
+  // with may still be placeholders. Resolving them inside the queued
+  // task - rather than when the step was pushed - is what makes
+  // "tap, oh no, undo" work at all.
+  function undoLast() {
     const step = undoStack[undoStack.length - 1];
-    if (!step || busy) return;
+    if (!step) return;
 
     // Popped first. If the compensating write fails the error is shown
     // and the step is gone - retrying an undo whose state has already
@@ -470,8 +752,6 @@ export function NetworkEditor({
 
     switch (step.kind) {
       case "add-node": {
-        const ok = await run(() => deleteGraphNode({ resortId, nodeId: step.nodeId }));
-        if (!ok) return;
         setEdges((prev) =>
           prev.filter((e) => e.fromNodeId !== step.nodeId && e.toNodeId !== step.nodeId)
         );
@@ -480,29 +760,41 @@ export function NetworkEditor({
         if (entranceId === step.nodeId) setEntranceId(null);
         setSelectedNodeId(null);
         setUndoNote("Took back the junction.");
+        enqueue(async () => {
+          const realId = resolveId(step.nodeId);
+          if (isTempId(realId)) return;
+          const result = await deleteGraphNode({ resortId, nodeId: realId });
+          if (result.error) setError(result.error);
+        });
         return;
       }
 
       case "add-edge": {
-        const ok = await run(() => deleteGraphEdge({ resortId, edgeId: step.edgeId }));
-        if (!ok) return;
         setEdges((prev) => prev.filter((e) => e.id !== step.edgeId));
         setChainNodeId(step.chainNodeIdBefore);
         setSelectedEdgeId(null);
         setUndoNote("Took back the road.");
+        enqueue(async () => {
+          const realId = resolveId(step.edgeId);
+          if (isTempId(realId)) return;
+          const result = await deleteGraphEdge({ resortId, edgeId: realId });
+          if (result.error) setError(result.error);
+        });
         return;
       }
 
       case "move-node": {
-        const ok = await run(() =>
-          moveGraphNode({
+        enqueue(async () => {
+          const realId = resolveId(step.nodeId);
+          if (isTempId(realId)) return;
+          const result = await moveGraphNode({
             resortId,
-            nodeId: step.nodeId,
+            nodeId: realId,
             lat: step.from.lat,
             lng: step.from.lng,
-          })
-        );
-        if (!ok) return;
+          });
+          if (result.error) setError(result.error);
+        });
         setNodes((prev) =>
           prev.map((n) => (n.id === step.nodeId ? { ...n, ...step.from } : n))
         );
@@ -522,120 +814,161 @@ export function NetworkEditor({
       }
 
       case "delete-node": {
-        const created = await run(() =>
-          addGraphNode({ resortId, lat: step.node.lat, lng: step.node.lng })
-        );
-        if (!created?.nodeId) return;
-        const newNodeId = created.nodeId;
-        const restoredNode: GraphNode = { ...step.node, id: newNodeId };
+        // Put the junction and its roads back on the map now, under
+        // placeholder ids, and let the queue turn them into real rows.
+        const tempNodeId = newTempId();
+        const restoredNode: GraphNode = { ...step.node, id: tempNodeId };
         setNodes((prev) => [...prev, restoredNode]);
-        // Everything that comes back does so under a new id; the older
-        // steps still naming the old ones get rebound at the end.
-        const idMap = new Map<string, string>([[step.node.id, newNodeId]]);
 
-        // The junction comes back with a new id, so every road that ran
-        // into it is rebuilt pointing at the replacement. A road whose
-        // far end has since been deleted has nothing to attach to and is
-        // counted as lost rather than silently dropped.
-        let restored = 0;
+        // A road whose far end has since been deleted has nothing to
+        // attach to; it's counted as lost rather than silently dropped.
+        const rebuildable: { edge: GraphEdge; tempId: string; from: string; to: string }[] = [];
         let lost = 0;
         for (const edge of step.attachedEdges) {
-          const otherId =
-            edge.fromNodeId === step.node.id ? edge.toNodeId : edge.fromNodeId;
-          const otherStillThere =
-            otherId === newNodeId || nodes.some((n) => n.id === otherId);
-          if (!otherStillThere) {
+          const otherId = edge.fromNodeId === step.node.id ? edge.toNodeId : edge.fromNodeId;
+          if (otherId !== step.node.id && !nodes.some((nd) => nd.id === otherId)) {
             lost += 1;
             continue;
           }
-
-          const fromNodeId = edge.fromNodeId === step.node.id ? newNodeId : edge.fromNodeId;
-          const toNodeId = edge.toNodeId === step.node.id ? newNodeId : edge.toNodeId;
-          // Endpoints are re-derived from the nodes by the server; only
-          // the bends in between need sending back.
-          const bends = edge.shape
-            .slice(1, -1)
-            .map(([lat, lng]) => ({ lat, lng }));
-
-          const createdEdge = await run(() =>
-            addGraphEdge({ resortId, fromNodeId, toNodeId, shape: bends })
-          );
-          if (!createdEdge?.edgeId) {
-            lost += 1;
-            continue;
-          }
-          restored += 1;
-          idMap.set(edge.id, createdEdge.edgeId);
-          setEdges((prev) => [
-            ...prev,
-            { ...edge, id: createdEdge.edgeId!, fromNodeId, toNodeId },
-          ]);
+          const from = edge.fromNodeId === step.node.id ? tempNodeId : edge.fromNodeId;
+          const to = edge.toNodeId === step.node.id ? tempNodeId : edge.toNodeId;
+          rebuildable.push({ edge, tempId: newTempId(), from, to });
         }
+        setEdges((prev) => [
+          ...prev,
+          ...rebuildable.map(({ edge, tempId, from, to }) => ({
+            ...edge,
+            id: tempId,
+            fromNodeId: from,
+            toNodeId: to,
+          })),
+        ]);
 
-        setUndoStack((prev) => remapUndoStack(prev, idMap));
-        if (chainNodeId === step.node.id) setChainNodeId(newNodeId);
-
-        if (step.wasEntrance) {
-          const ok = await run(() => setEntranceNode({ resortId, nodeId: newNodeId }));
-          if (ok) setEntranceId(newNodeId);
-        }
+        // The stack still names the deleted junction; point it at the
+        // stand-in, which the queue will then point at the real row.
+        setUndoStack((prev) =>
+          remapUndoStack(
+            prev,
+            new Map([
+              [step.node.id, tempNodeId],
+              ...rebuildable.map(({ edge, tempId }) => [edge.id, tempId] as [string, string]),
+            ])
+          )
+        );
+        if (chainNodeId === step.node.id) setChainNodeId(tempNodeId);
+        if (step.wasEntrance) setEntranceId(tempNodeId);
 
         setUndoNote(
           lost > 0
-            ? `Put the junction back with ${restored} of its ${step.attachedEdges.length} roads — ${lost} couldn't be restored because the other end is gone.`
-            : `Put the junction and its ${restored} road${restored === 1 ? "" : "s"} back.`
+            ? `Put the junction back with ${rebuildable.length} of its ${step.attachedEdges.length} roads — ${lost} couldn't be restored because the other end is gone.`
+            : `Put the junction and its ${rebuildable.length} road${
+                rebuildable.length === 1 ? "" : "s"
+              } back.`
         );
+
+        enqueue(async () => {
+          const created = await addGraphNode({
+            resortId,
+            lat: step.node.lat,
+            lng: step.node.lng,
+          });
+          if (!created.nodeId) {
+            setError(created.error ?? "That junction couldn't be put back.");
+            return;
+          }
+          applyIdMapping(new Map([[tempNodeId, created.nodeId]]));
+
+          for (const { tempId, from, to, edge } of rebuildable) {
+            const realFrom = resolveId(from);
+            const realTo = resolveId(to);
+            if (isTempId(realFrom) || isTempId(realTo)) continue;
+            const bends = edge.shape.slice(1, -1).map(([lat, lng]) => ({ lat, lng }));
+            const createdEdge = await addGraphEdge({
+              resortId,
+              fromNodeId: realFrom,
+              toNodeId: realTo,
+              shape: bends,
+            });
+            if (createdEdge.edgeId) {
+              applyIdMapping(new Map([[tempId, createdEdge.edgeId]]));
+            } else {
+              setError(createdEdge.error ?? "A road couldn't be put back.");
+            }
+          }
+
+          if (step.wasEntrance) {
+            const real = resolveId(tempNodeId);
+            if (!isTempId(real)) {
+              const result = await setEntranceNode({ resortId, nodeId: real });
+              if (result.error) setError(result.error);
+            }
+          }
+        });
         return;
       }
 
       case "delete-edge": {
         const bothEndsThere =
-          nodes.some((n) => n.id === step.edge.fromNodeId) &&
-          nodes.some((n) => n.id === step.edge.toNodeId);
+          nodes.some((nd) => nd.id === step.edge.fromNodeId) &&
+          nodes.some((nd) => nd.id === step.edge.toNodeId);
         if (!bothEndsThere) {
           setError(
             "That road can't come back — one of the junctions it ran between has since been deleted."
           );
           return;
         }
-        const bends = step.edge.shape.slice(1, -1).map(([lat, lng]) => ({ lat, lng }));
-        const created = await run(() =>
-          addGraphEdge({
-            resortId,
-            fromNodeId: step.edge.fromNodeId,
-            toNodeId: step.edge.toNodeId,
-            shape: bends,
-          })
-        );
-        if (!created?.edgeId) return;
-        setEdges((prev) => [...prev, { ...step.edge, id: created.edgeId! }]);
-        setUndoStack((prev) =>
-          remapUndoStack(prev, new Map([[step.edge.id, created.edgeId!]]))
-        );
+        const tempEdgeId = newTempId();
+        setEdges((prev) => [...prev, { ...step.edge, id: tempEdgeId }]);
+        setUndoStack((prev) => remapUndoStack(prev, new Map([[step.edge.id, tempEdgeId]])));
         setUndoNote("Put the road back.");
+
+        enqueue(async () => {
+          const realFrom = resolveId(step.edge.fromNodeId);
+          const realTo = resolveId(step.edge.toNodeId);
+          if (isTempId(realFrom) || isTempId(realTo)) {
+            setError("That road couldn't be put back — one of its ends hasn't saved.");
+            return;
+          }
+          const bends = step.edge.shape.slice(1, -1).map(([lat, lng]) => ({ lat, lng }));
+          const created = await addGraphEdge({
+            resortId,
+            fromNodeId: realFrom,
+            toNodeId: realTo,
+            shape: bends,
+          });
+          if (!created.edgeId) {
+            setError(created.error ?? "That road couldn't be put back.");
+            return;
+          }
+          applyIdMapping(new Map([[tempEdgeId, created.edgeId]]));
+        });
         return;
       }
 
       case "set-entrance": {
         if (step.previousEntranceId) {
-          const stillThere = nodes.some((n) => n.id === step.previousEntranceId);
-          if (!stillThere) {
+          const previousId = step.previousEntranceId;
+          if (!nodes.some((nd) => nd.id === previousId)) {
             setError(
               "The junction that used to be the entrance has since been deleted, so it can't be put back."
             );
             return;
           }
-          const ok = await run(() =>
-            setEntranceNode({ resortId, nodeId: step.previousEntranceId! })
-          );
-          if (!ok) return;
-          setEntranceId(step.previousEntranceId);
+          setEntranceId(previousId);
           setUndoNote("Put the entrance back where it was.");
+          enqueue(async () => {
+            const realId = resolveId(previousId);
+            if (isTempId(realId)) return;
+            const result = await setEntranceNode({ resortId, nodeId: realId });
+            if (result.error) setError(result.error);
+          });
         } else {
-          const ok = await run(() => clearEntranceNode({ resortId }));
-          if (!ok) return;
           setEntranceId(null);
           setUndoNote("Cleared the entrance again.");
+          enqueue(async () => {
+            const result = await clearEntranceNode({ resortId });
+            if (result.error) setError(result.error);
+          });
         }
         return;
       }
@@ -716,7 +1049,7 @@ export function NetworkEditor({
         <button
           type="button"
           onClick={() => void undoLast()}
-          disabled={!nextUndo || busy}
+          disabled={!nextUndo}
           title={
             nextUndo
               ? `Undo ${describeStep(nextUndo)} (Ctrl+Z)`
@@ -752,14 +1085,18 @@ export function NetworkEditor({
           </label>
         )}
 
-        {busy && <span className="text-xs text-neutral-500">Saving…</span>}
+        {inFlight > 0 && (
+          <span className="text-xs text-neutral-500">
+            Saving{inFlight > 1 ? ` ${inFlight} changes` : ""}…
+          </span>
+        )}
       </div>
 
       <p className="text-sm text-neutral-600">
         {mode === "draw"
           ? chainNodeId
-            ? "Keep tapping along the street — each tap continues the road. Tap an existing junction to join onto it, then Finish."
-            : "Tap where a street starts, then tap along it. Snap onto an existing junction to connect roads together."
+            ? "Keep tapping along the street — each tap continues the road. Tap an existing junction, or anywhere along an existing road, to join onto it, then Finish."
+            : "Tap where a street starts, then tap along it. Tap an existing junction — or anywhere along an existing road — to join onto it; the road is split at that point so the join is real."
           : "Tap a junction or a road to move or delete it. Drag a junction to reposition it — the roads follow."}
       </p>
 
@@ -828,10 +1165,16 @@ export function NetworkEditor({
             />
           )}
 
+          {/* Deliberately not gated on whether a save is in flight. The
+              old version ignored clicks for the length of every round
+              trip, which is what made tapping along a street lose most
+              of the taps. */}
           <MapClickHandler
-            enabled={mode === "draw" && !busy}
+            enabled={mode === "draw"}
             nodes={nodes}
+            edges={edges}
             onPlace={extendChain}
+            onHover={setSnapPreview}
           />
 
           {sites.map((site) => (
@@ -872,6 +1215,14 @@ export function NetworkEditor({
             />
           ))}
 
+          {snapPreview?.kind === "edge" && (
+            <Marker
+              position={[snapPreview.lat, snapPreview.lng]}
+              icon={roadSnapIcon()}
+              interactive={false}
+            />
+          )}
+
           {nodes.map((node) => (
             <Marker
               key={node.id}
@@ -879,7 +1230,8 @@ export function NetworkEditor({
               icon={nodeIcon(
                 node.id === entranceId,
                 node.id === selectedNodeId,
-                node.id === chainNodeId
+                node.id === chainNodeId,
+                snapPreview?.kind === "node" && snapPreview.nodeId === node.id
               )}
               draggable={mode === "edit"}
               eventHandlers={{
@@ -909,15 +1261,20 @@ export function NetworkEditor({
           {selectedNode.id !== entranceId && (
             <button
               type="button"
-              disabled={busy}
-              onClick={async () => {
+              onClick={() => {
                 const previousEntranceId = entranceId;
-                const ok = await run(() =>
-                  setEntranceNode({ resortId, nodeId: selectedNode.id })
-                );
-                if (!ok) return;
-                setEntranceId(selectedNode.id);
+                const nodeId = selectedNode.id;
+                setEntranceId(nodeId);
                 pushUndo({ kind: "set-entrance", previousEntranceId });
+                enqueue(async () => {
+                  const realId = resolveId(nodeId);
+                  if (isTempId(realId)) {
+                    setError("That junction hasn't finished saving yet.");
+                    return;
+                  }
+                  const result = await setEntranceNode({ resortId, nodeId: realId });
+                  if (result.error) setError(result.error);
+                });
               }}
               className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm"
             >
@@ -926,8 +1283,7 @@ export function NetworkEditor({
           )}
           <button
             type="button"
-            disabled={busy}
-            onClick={() => void handleDeleteNode(selectedNode.id)}
+            onClick={() => handleDeleteNode(selectedNode.id)}
             className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700"
           >
             Delete junction
@@ -943,15 +1299,17 @@ export function NetworkEditor({
           </span>
           <button
             type="button"
-            disabled={busy}
-            onClick={async () => {
-              const ok = await run(() =>
-                deleteGraphEdge({ resortId, edgeId: selectedEdge.id })
-              );
-              if (!ok) return;
-              setEdges((prev) => prev.filter((e) => e.id !== selectedEdge.id));
+            onClick={() => {
+              const edgeId = selectedEdge.id;
+              setEdges((prev) => prev.filter((e) => e.id !== edgeId));
               setSelectedEdgeId(null);
               pushUndo({ kind: "delete-edge", edge: selectedEdge });
+              enqueue(async () => {
+                const realId = resolveId(edgeId);
+                if (isTempId(realId)) return;
+                const result = await deleteGraphEdge({ resortId, edgeId: realId });
+                if (result.error) setError(result.error);
+              });
             }}
             className="rounded-md border border-red-300 px-3 py-1.5 text-sm text-red-700"
           >
@@ -992,39 +1350,92 @@ export function NetworkEditor({
 function MapClickHandler({
   enabled,
   nodes,
+  edges,
   onPlace,
+  onHover,
 }: {
   enabled: boolean;
   nodes: GraphNode[];
-  onPlace: (lat: number, lng: number, snappedNodeId: string | null) => void;
+  edges: GraphEdge[];
+  onPlace: (lat: number, lng: number, snap: SnapTarget | null) => void;
+  onHover: (snap: SnapTarget | null) => void;
 }) {
   const map = useMapEvents({
     click: (event) => {
       if (!enabled) return;
-      const { lat, lng } = event.latlng;
-
-      // Snapping is judged in screen pixels, not metres, so it feels the
-      // same whether you're zoomed out over the whole resort or in on one
-      // corner of it.
-      const clickPoint = map.latLngToContainerPoint(event.latlng);
-      let snappedNodeId: string | null = null;
-      let closest = SNAP_PIXELS;
-      for (const node of nodes) {
-        const nodePoint = map.latLngToContainerPoint([node.lat, node.lng]);
-        const pixels = clickPoint.distanceTo(nodePoint);
-        if (pixels <= closest) {
-          closest = pixels;
-          snappedNodeId = node.id;
-        }
-      }
-
-      if (snappedNodeId) {
-        const snapped = nodes.find((n) => n.id === snappedNodeId)!;
-        onPlace(snapped.lat, snapped.lng, snappedNodeId);
-      } else {
-        onPlace(lat, lng, null);
-      }
+      const snap = findSnap(map, event.latlng, nodes, edges);
+      if (snap) onPlace(snap.lat, snap.lng, snap);
+      else onPlace(event.latlng.lat, event.latlng.lng, null);
     },
+    // Shows what the next click will join onto, before it happens.
+    mousemove: (event) => {
+      if (!enabled) {
+        onHover(null);
+        return;
+      }
+      onHover(findSnap(map, event.latlng, nodes, edges));
+    },
+    mouseout: () => onHover(null),
   });
+  return null;
+}
+
+// What a click at this position would join onto, if anything.
+//
+// Junctions win over roads at equal distance: joining two streets at a
+// junction that already exists is always better than splitting a road
+// right beside it and leaving two junctions a metre apart.
+function findSnap(
+  map: L.Map,
+  latlng: L.LatLng,
+  nodes: GraphNode[],
+  edges: GraphEdge[]
+): SnapTarget | null {
+  const clickPoint = map.latLngToContainerPoint(latlng);
+  const at = (lat: number, lng: number): Pt => {
+    const p = map.latLngToContainerPoint([lat, lng]);
+    return { x: p.x, y: p.y };
+  };
+  const from: Pt = { x: clickPoint.x, y: clickPoint.y };
+
+  let bestNode: { node: GraphNode; distance: number } | null = null;
+  for (const node of nodes) {
+    const p = at(node.lat, node.lng);
+    const distance = Math.hypot(from.x - p.x, from.y - p.y);
+    if (distance <= SNAP_PIXELS && (!bestNode || distance < bestNode.distance)) {
+      bestNode = { node, distance };
+    }
+  }
+  if (bestNode) {
+    return {
+      kind: "node",
+      nodeId: bestNode.node.id,
+      lat: bestNode.node.lat,
+      lng: bestNode.node.lng,
+    };
+  }
+
+  let bestEdge: { edge: GraphEdge; hit: NonNullable<ReturnType<typeof closestPointOnPolyline>> } | null =
+    null;
+  for (const edge of edges) {
+    if (edge.shape.length < 2) continue;
+    const hit = closestPointOnPolyline(
+      from,
+      edge.shape.map(([lat, lng]) => at(lat, lng))
+    );
+    if (!hit || hit.distance > SNAP_PIXELS) continue;
+    if (!bestEdge || hit.distance < bestEdge.hit.distance) bestEdge = { edge, hit };
+  }
+  if (bestEdge) {
+    const snapped = map.containerPointToLatLng([bestEdge.hit.point.x, bestEdge.hit.point.y]);
+    return {
+      kind: "edge",
+      edgeId: bestEdge.edge.id,
+      lat: snapped.lat,
+      lng: snapped.lng,
+      index: bestEdge.hit.index,
+    };
+  }
+
   return null;
 }
