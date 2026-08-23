@@ -68,7 +68,20 @@ const updateResortSchema = z.object({
   totalHomes: z.coerce.number().int().min(1).max(5000).nullable(),
 });
 
-export async function updateResort(formData: FormData) {
+export interface ResortSaveState {
+  error?: string;
+  /** When the save landed, so the form can confirm it actually happened
+   *  rather than leaving staff to guess from an unchanged screen. */
+  savedAt?: number;
+  /** Echoed back so the confirmation can say what the save did, not just
+   *  that it did something. */
+  published?: boolean;
+}
+
+export async function updateResort(
+  _prevState: ResortSaveState,
+  formData: FormData
+): Promise<ResortSaveState> {
   const rawLat = formData.get("centerLat");
   const rawLng = formData.get("centerLng");
   const rawTotalHomes = formData.get("totalHomes");
@@ -84,8 +97,10 @@ export async function updateResort(formData: FormData) {
     totalHomes: rawTotalHomes ? rawTotalHomes : null,
   });
 
+  // Returned rather than thrown: a validation mistake belongs next to the
+  // field, not on an error page that loses everything else typed in.
   if (!parsed.success) {
-    throw new Error(parsed.error.issues[0]?.message ?? "Invalid input");
+    return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
 
   const supabase = await createClient();
@@ -108,15 +123,19 @@ export async function updateResort(formData: FormData) {
     .eq("id", parsed.data.resortId);
 
   if (error) {
-    throw new Error(
-      error.code === "23505"
-        ? "That slug is already in use by another resort."
-        : error.message
-    );
+    return {
+      error:
+        error.code === "23505"
+          ? "That address is already in use by another resort."
+          : error.message,
+    };
   }
 
   revalidatePath(`/admin/resorts/${parsed.data.resortId}`);
   revalidatePath("/admin/resorts");
+  revalidatePath(`/r/${parsed.data.slug}`);
+
+  return { savedAt: Date.now(), published: parsed.data.isPublished };
 }
 
 export async function deleteResort(formData: FormData) {
