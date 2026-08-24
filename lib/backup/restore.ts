@@ -14,6 +14,7 @@
 // page's server action.
 
 import { z } from "zod";
+import { normaliseSiteNumber } from "@/lib/sites/site-number";
 
 const resortSchema = z.object({
   id: z.string(),
@@ -28,7 +29,15 @@ const resortSchema = z.object({
 
 const siteSchema = z.object({
   resort_id: z.string(),
-  site_number: z.string().min(1),
+  // A backup taken before site numbers were padded holds them
+  // unpadded. Restoring one as-is would quietly undo the tidy-up and
+  // leave the same home spelled two ways again, so they're brought into
+  // line on the way in. Anything that isn't a plain site number is left
+  // exactly as it was found.
+  site_number: z
+    .string()
+    .min(1)
+    .transform((raw) => normaliseSiteNumber(raw) ?? raw),
   label: z.string().nullable().default(null),
   status: z.enum(["active", "inactive", "draft"]).default("draft"),
   lat: z.number().nullable(),
