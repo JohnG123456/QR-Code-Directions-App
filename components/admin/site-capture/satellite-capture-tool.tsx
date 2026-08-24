@@ -13,6 +13,7 @@ import { loadMasterplanDraft } from "@/app/(admin)/admin/(protected)/resorts/[re
 import type { PointPair } from "@/lib/geo/similarity-transform";
 import type { SiteStatus } from "@/lib/types";
 import type { ActionState } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
+import { SiteNumberInput } from "@/components/admin/site-number-input";
 import "leaflet/dist/leaflet.css";
 
 export interface CapturedSite {
@@ -276,8 +277,11 @@ export function SatelliteCaptureTool({
   const [renameValue, setRenameValue] = useState("");
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
   const [isUndoing, setIsUndoing] = useState(false);
-  const [showPlan, setShowPlan] = useState(false);
-  const [planOpacity, setPlanOpacity] = useState(0.6);
+  // On from the start. This screen exists to check pins against the
+  // plan, and switching it on by hand every visit was a step with no
+  // decision in it. 75% keeps the imagery readable underneath.
+  const [showPlan, setShowPlan] = useState(true);
+  const [planOpacity, setPlanOpacity] = useState(0.75);
   const [planImage, setPlanImage] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -296,20 +300,37 @@ export function SatelliteCaptureTool({
         )
       : null;
 
-  // Fetched only when switched on: it's a couple of MB.
   function togglePlan(wanted: boolean) {
     setShowPlan(wanted);
-    if (!wanted || planImage || planLoading || !georeference) return;
+  }
+
+  // Fetched once, on arrival, because the plan is shown from the start.
+  //
+  // Guarded by a ref rather than by the loading flag: that flag is
+  // state, so depending on it would re-run this the moment it's set and
+  // fetch a couple of megabytes twice.
+  const planRequested = useRef(false);
+  useEffect(() => {
+    if (!georeference || planRequested.current) return;
+    planRequested.current = true;
+    let cancelled = false;
     setPlanLoading(true);
-    setActionError(null);
-    loadMasterplanDraft(resortId)
-      .then((draft) => {
+    void (async () => {
+      try {
+        const draft = await loadMasterplanDraft(resortId);
+        if (cancelled) return;
         if (draft?.imageDataUrl) setPlanImage(draft.imageDataUrl);
         else setActionError("There's no saved master plan image for this resort yet.");
-      })
-      .catch(() => setActionError("Couldn't load the master plan image."))
-      .finally(() => setPlanLoading(false));
-  }
+      } catch {
+        if (!cancelled) setActionError("Couldn't load the master plan image.");
+      } finally {
+        if (!cancelled) setPlanLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [georeference, resortId]);
 
   useEffect(() => {
     fixDefaultLeafletIcon();
@@ -852,18 +873,12 @@ export function SatelliteCaptureTool({
         <div className="flex flex-col gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-3 text-sm text-amber-900">
           <label className="flex flex-col gap-1 font-medium">
             New pin — site number
-            <input
+            <SiteNumberInput
               autoFocus
               value={newSiteNumber}
-              onChange={(e) => setNewSiteNumber(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSaveNewSite()}
-              // A site number can carry a letter (087A), and a numeric
-              // keypad has no letters on it.
-              inputMode="text"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-              className="w-32 rounded border border-neutral-300 bg-white px-2 py-1 text-base text-neutral-900"
+              onChange={setNewSiteNumber}
+              onEnter={handleSaveNewSite}
+              ariaLabel="Site number for the new pin"
             />
           </label>
           {saveError && <p className="text-red-700">{saveError}</p>}
@@ -896,21 +911,13 @@ export function SatelliteCaptureTool({
           {renamingId === selectedSite.id ? (
             <label className="flex flex-col gap-1 font-medium">
               Site number
-              <input
+              <SiteNumberInput
                 autoFocus
                 value={renameValue}
-                onChange={(e) => setRenameValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleRename(selectedSite.id, renameValue);
-                  if (e.key === "Escape") setRenamingId(null);
-                }}
-                // A site number can carry a letter (087A), and a numeric
-              // keypad has no letters on it.
-              inputMode="text"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
-                className="w-32 rounded border border-neutral-300 px-2 py-1 text-base"
+                onChange={setRenameValue}
+                onEnter={() => void handleRename(selectedSite.id, renameValue)}
+                onEscape={() => setRenamingId(null)}
+                ariaLabel="Site number"
               />
             </label>
           ) : (

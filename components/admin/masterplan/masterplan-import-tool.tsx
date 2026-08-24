@@ -24,6 +24,7 @@ import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { ImportResult } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
 import "leaflet/dist/leaflet.css";
 import { NeedsReferencePoint } from "@/components/admin/needs-reference-point";
+import { SiteNumberInput } from "@/components/admin/site-number-input";
 
 type Step = "upload" | "review" | "calibrate" | "preview" | "done";
 
@@ -819,19 +820,14 @@ export function MasterplanImportTool({
                     }}
                   >
                     <div className="flex items-center gap-1">
-                      <input
+                      <SiteNumberInput
                         autoFocus
-                        // A site number can carry a letter (087A), and a numeric
-              // keypad has no letters on it.
-              inputMode="text"
-              autoCapitalize="characters"
-              autoCorrect="off"
-              spellCheck={false}
                         value={newLabelText}
-                        onChange={(e) => setNewLabelText(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && confirmNewLabel()}
+                        onChange={setNewLabelText}
+                        onEnter={confirmNewLabel}
                         placeholder="Site #"
-                        className="w-16 rounded border border-neutral-300 px-1 py-0.5 text-xs"
+                        ariaLabel="Site number"
+                        className="w-20"
                       />
                       <button
                         type="button"
