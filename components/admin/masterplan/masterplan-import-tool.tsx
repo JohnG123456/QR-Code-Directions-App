@@ -23,6 +23,7 @@ import {
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { ImportResult } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
 import "leaflet/dist/leaflet.css";
+import { NeedsReferencePoint } from "@/components/admin/needs-reference-point";
 
 type Step = "upload" | "review" | "calibrate" | "preview" | "done";
 
@@ -173,11 +174,10 @@ export function MasterplanImportTool({
 
   if (centerLat === null || centerLng === null) {
     return (
-      <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        This resort doesn&apos;t have a reference point set yet. Set one first
-        under the resort&apos;s Settings (used as the anchor for converting the
-        plan into real coordinates).
-      </p>
+      <NeedsReferencePoint
+        resortId={resortId}
+        blockedTask="Turning a master plan into real positions"
+      />
     );
   }
   const reference = { lat: centerLat, lng: centerLng };

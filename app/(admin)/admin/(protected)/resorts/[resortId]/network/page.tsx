@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
 import { NetworkEditorClient } from "./network-editor-client";
 import { ConnectSitesPanel } from "@/components/admin/network/connect-sites-panel";
+import { NeedsReferencePoint } from "@/components/admin/needs-reference-point";
 import {
   addGraphNode,
   addGraphEdge,
@@ -71,10 +72,7 @@ export default async function NetworkPage({
         >
           ← {resort.name}
         </Link>
-        <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          This resort needs a reference point before the road network can be
-          drawn. Set one under the resort&apos;s Settings.
-        </p>
+        <NeedsReferencePoint resortId={resortId} blockedTask="Tracing the roads" />
       </div>
     );
   }

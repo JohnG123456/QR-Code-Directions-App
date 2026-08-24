@@ -5,6 +5,7 @@ import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
 import { boundaryToRings } from "@/lib/geo/resort-boundary";
 import { BoundaryEditorClient } from "./boundary-editor-client";
 import { saveResortBoundary, clearResortBoundary } from "./actions";
+import { NeedsReferencePoint } from "@/components/admin/needs-reference-point";
 
 export default async function BoundaryPage({
   params,
@@ -44,10 +45,7 @@ export default async function BoundaryPage({
         >
           ← {resort.name}
         </Link>
-        <p className="rounded-md bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          This resort needs a reference point before its boundary can be traced.
-          Set one under the resort&apos;s Settings.
-        </p>
+        <NeedsReferencePoint resortId={resortId} blockedTask="Tracing the boundary" />
       </div>
     );
   }
