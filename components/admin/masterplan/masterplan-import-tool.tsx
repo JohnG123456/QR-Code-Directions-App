@@ -63,6 +63,11 @@ export function MasterplanImportTool({
   const [labels, setLabels] = useState<ExtractedLabel[]>([]);
   const [pendingNewLabel, setPendingNewLabel] = useState<{ x: number; y: number } | null>(null);
   const [newLabelText, setNewLabelText] = useState("");
+  // The range of site numbers this resort actually uses. Left blank
+  // until staff fill it in - guessing it from what was scanned would
+  // just enshrine whatever the scan got wrong.
+  const [rangeFrom, setRangeFrom] = useState("");
+  const [rangeTo, setRangeTo] = useState("");
   const [selectedLabelId, setSelectedLabelId] = useState<string | null>(null);
   // Off by default: at fit-to-width zoom on a phone the numbers overlap
   // into an unreadable band across the drawing. Zoom in first, then turn
@@ -351,6 +356,25 @@ export function MasterplanImportTool({
 
   function removeLabel(id: string) {
     setLabels((prev) => prev.filter((l) => l.id !== id));
+  }
+
+  /** Numbers the scan found that fall outside the range staff say the
+   *  resort uses. A sheet carries lot references, levels and stage
+   *  numbers that look exactly like site numbers, and picking them off
+   *  one at a time is most of the work of a review. */
+  const outsideRange = (() => {
+    const from = Number(rangeFrom);
+    const to = Number(rangeTo);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || from < 1 || to < from) return [];
+    return labels.filter((l) => {
+      const n = Number(l.text.slice(0, 3));
+      return Number.isFinite(n) && (n < from || n > to);
+    });
+  })();
+
+  function removeOutsideRange() {
+    const doomed = new Set(outsideRange.map((l) => l.id));
+    setLabels((prev) => prev.filter((l) => !doomed.has(l.id)));
   }
 
   function handleCalibratePlanClick(point: { x: number; y: number }) {
@@ -650,12 +674,57 @@ export function MasterplanImportTool({
             </p>
           ) : (
             <p className="text-sm text-neutral-600">
-              Found <strong>{labels.length}</strong> candidate site numbers.
-              Zoom in and tap a dot to check or remove a false positive (dates,
-              scale bars and project numbers sometimes get picked up); tap a
+              Found <strong>{labels.length}</strong> candidate site numbers,
+              written the way they appear on the plan — 013, not 13.
+              {plan.droppedForSize ? (
+                <>
+                  {" "}
+                  Another {plan.droppedForSize} number
+                  {plan.droppedForSize === 1 ? " was" : "s were"} set in a
+                  different size of type and left out as dimensions rather than
+                  sites.
+                </>
+              ) : null}{" "}
+              Zoom in and tap a dot to check or remove a false positive; tap a
               blank spot to add one that was missed.
             </p>
           )}
+          <div className="flex flex-wrap items-end gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2 text-sm">
+            <span className="text-neutral-700">
+              This resort&apos;s numbers run from
+            </span>
+            <input
+              inputMode="numeric"
+              value={rangeFrom}
+              onChange={(e) => setRangeFrom(e.target.value)}
+              placeholder="1"
+              className="w-16 rounded border border-neutral-300 px-2 py-1 text-neutral-900"
+              aria-label="Lowest site number"
+            />
+            <span className="text-neutral-700">to</span>
+            <input
+              inputMode="numeric"
+              value={rangeTo}
+              onChange={(e) => setRangeTo(e.target.value)}
+              placeholder="252"
+              className="w-16 rounded border border-neutral-300 px-2 py-1 text-neutral-900"
+              aria-label="Highest site number"
+            />
+            <button
+              type="button"
+              disabled={outsideRange.length === 0}
+              onClick={removeOutsideRange}
+              className="rounded-md border border-neutral-300 bg-white px-3 py-1 text-neutral-800 disabled:opacity-40"
+            >
+              Remove the {outsideRange.length} outside it
+            </button>
+            <span className="w-full text-xs text-neutral-500">
+              Lot references, levels and stage numbers on the sheet look just
+              like site numbers. If you know the range, this clears them in one
+              go instead of one at a time.
+            </span>
+          </div>
+
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap">
               <input
@@ -752,7 +821,12 @@ export function MasterplanImportTool({
                     <div className="flex items-center gap-1">
                       <input
                         autoFocus
-                        inputMode="numeric"
+                        // A site number can carry a letter (087A), and a numeric
+              // keypad has no letters on it.
+              inputMode="text"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
                         value={newLabelText}
                         onChange={(e) => setNewLabelText(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && confirmNewLabel()}
