@@ -142,7 +142,7 @@ export default async function ResortDetailPage({
         unpublishPlanOverlay={unpublishPlanOverlay}
       />
 
-      <div>
+      <div id="settings" className="scroll-mt-4">
         <h2 className="mb-3 text-sm font-semibold">Settings</h2>
         <ResortSettingsForm
           resortId={resort.id}
