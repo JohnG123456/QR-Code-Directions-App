@@ -4,6 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { dedupeImportRows, mergeImportRows } from "@/lib/sites/merge-import-rows";
+import { normaliseSiteNumber } from "@/lib/sites/site-number";
 
 export interface ActionState {
   error?: string;
@@ -13,9 +14,32 @@ export interface ActionState {
   siteId?: string;
 }
 
+// Stored the way it is written down: three digits with any leading
+// zeros, and an upper-case letter where a block has been split. Done
+// here rather than in each screen so a number typed on the map, typed
+// on the sites list, or read off a plan all end up identical - which is
+// what stops the same home appearing twice under 13 and 013.
+const siteNumberSchema = z
+  .string()
+  .trim()
+  .min(1, "Site number is required")
+  .transform((raw, ctx) => {
+    const normalised = normaliseSiteNumber(raw);
+    if (!normalised) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "A site number is up to three digits, with an optional letter for a duplex - like 87 or 87A.",
+      });
+      return z.NEVER;
+    }
+    return normalised;
+  });
+
+
 const addSiteSchema = z.object({
   resortId: z.string().uuid(),
-  siteNumber: z.string().trim().min(1, "Site number is required"),
+  siteNumber: siteNumberSchema,
   lat: z.coerce.number().min(-90).max(90),
   lng: z.coerce.number().min(-180).max(180),
   accuracy: z.coerce.number().optional(),
@@ -73,7 +97,9 @@ export async function addSite(
 }
 
 const importRowSchema = z.object({
-  site_number: z.string().trim().min(1),
+  // Same rule as typing one by hand: a CSV or a scanned plan that says
+  // "13" means site 013, and must not create a second home beside it.
+  site_number: siteNumberSchema,
   label: z.string().trim().optional(),
   latitude: z.coerce.number().min(-90).max(90),
   longitude: z.coerce.number().min(-180).max(180),
@@ -161,7 +187,7 @@ export async function bulkUpsertSites(
 
 const restoreSiteSchema = z.object({
   resortId: z.string().uuid(),
-  siteNumber: z.string().trim().min(1),
+  siteNumber: siteNumberSchema,
   label: z.string().nullable(),
   status: z.enum(["active", "inactive", "draft"]),
   lat: z.number().min(-90).max(90),
@@ -266,7 +292,7 @@ export async function deleteSite(formData: FormData) {
 const updateSiteDetailsSchema = z.object({
   siteId: z.string().uuid(),
   resortId: z.string().uuid(),
-  siteNumber: z.string().trim().min(1, "Site number is required"),
+  siteNumber: siteNumberSchema,
   label: z.string().trim().optional(),
 });
 

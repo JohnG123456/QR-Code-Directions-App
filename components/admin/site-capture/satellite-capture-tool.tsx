@@ -857,7 +857,12 @@ export function SatelliteCaptureTool({
               value={newSiteNumber}
               onChange={(e) => setNewSiteNumber(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSaveNewSite()}
-              inputMode="numeric"
+              // A site number can carry a letter (087A), and a numeric
+              // keypad has no letters on it.
+              inputMode="text"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
               className="w-32 rounded border border-neutral-300 bg-white px-2 py-1 text-base text-neutral-900"
             />
           </label>
@@ -899,7 +904,12 @@ export function SatelliteCaptureTool({
                   if (e.key === "Enter") void handleRename(selectedSite.id, renameValue);
                   if (e.key === "Escape") setRenamingId(null);
                 }}
-                inputMode="numeric"
+                // A site number can carry a letter (087A), and a numeric
+              // keypad has no letters on it.
+              inputMode="text"
+              autoCapitalize="characters"
+              autoCorrect="off"
+              spellCheck={false}
                 className="w-32 rounded border border-neutral-300 px-2 py-1 text-base"
               />
             </label>

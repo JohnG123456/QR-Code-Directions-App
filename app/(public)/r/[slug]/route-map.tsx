@@ -14,6 +14,7 @@ import {
 import type { PublicResort, PublicSite } from "@/lib/types";
 import type { PlanOverlayPlacement } from "@/lib/masterplan/published-overlay";
 import type { BoundaryRings } from "@/components/map/outside-mask";
+import { compareSiteNumbers, normaliseSiteNumber } from "@/lib/sites/site-number";
 
 interface RouteResult {
   distanceM: number;
@@ -75,12 +76,23 @@ export function RouteMap({
   const matches = useMemo(() => {
     if (!query.trim()) return [];
     const q = query.trim().toLowerCase();
+    // Site numbers are written with their leading zeros, but nobody
+    // types them: someone looking for 13 wants 013, and wants it at the
+    // top rather than below 130 and 131.
+    const exact = normaliseSiteNumber(query)?.toLowerCase() ?? null;
+
     return sites
       .filter(
         (s) =>
           s.site_number.toLowerCase().includes(q) ||
           s.label?.toLowerCase().includes(q)
       )
+      .sort((a, b) => {
+        const aExact = exact !== null && a.site_number.toLowerCase() === exact;
+        const bExact = exact !== null && b.site_number.toLowerCase() === exact;
+        if (aExact !== bExact) return aExact ? -1 : 1;
+        return compareSiteNumbers(a.site_number, b.site_number);
+      })
       .slice(0, 8);
   }, [query, sites]);
 
