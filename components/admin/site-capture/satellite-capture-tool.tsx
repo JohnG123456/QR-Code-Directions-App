@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { MapContainer, Marker, useMap, useMapEvents } from "react-leaflet";
 import type { Map as LeafletMap } from "leaflet";
 import { fixDefaultLeafletIcon } from "@/lib/map/fix-default-icon";
@@ -290,47 +290,67 @@ export function SatelliteCaptureTool({
   // captured. Checking a number against the printed plan is the whole job
   // when the imagery is out of date or the roof is one of six identical
   // ones in a row.
-  const georeference =
-    planCalibration && centerLat !== null && centerLng !== null
-      ? georeferencePlan(
-          planCalibration.pairs,
-          planCalibration.imageWidth,
-          planCalibration.imageHeight,
-          { lat: centerLat, lng: centerLng }
-        )
-      : null;
+  // Memoised, and that is not a nicety. Rebuilt on every render it is a
+  // new object each time, which re-runs anything depending on it - and
+  // the loader below depends on it. That is what left this screen
+  // reading "Loading the master plan image..." for ever: the re-run
+  // cancelled the fetch already in flight, and the cancelled run then
+  // skipped clearing the loading flag.
+  const georeference = useMemo(
+    () =>
+      planCalibration && centerLat !== null && centerLng !== null
+        ? georeferencePlan(
+            planCalibration.pairs,
+            planCalibration.imageWidth,
+            planCalibration.imageHeight,
+            { lat: centerLat, lng: centerLng }
+          )
+        : null,
+    [planCalibration, centerLat, centerLng]
+  );
 
   function togglePlan(wanted: boolean) {
     setShowPlan(wanted);
+    // Switching it back on is what anyone tries when it hasn't appeared,
+    // so make that actually retry rather than do nothing.
+    if (wanted && !planImage && !planLoading) {
+      planRequested.current = false;
+      setPlanRetry((n) => n + 1);
+    }
   }
 
   // Fetched once, on arrival, because the plan is shown from the start.
   //
-  // Guarded by a ref rather than by the loading flag: that flag is
-  // state, so depending on it would re-run this the moment it's set and
-  // fetch a couple of megabytes twice.
+  // The ref stops a second fetch of a couple of megabytes; the retry
+  // counter is how the toggle asks for another go after a failure.
   const planRequested = useRef(false);
+  const [planRetry, setPlanRetry] = useState(0);
   useEffect(() => {
-    if (!georeference || planRequested.current) return;
+    if (!georeference || planImage || planRequested.current) return;
     planRequested.current = true;
-    let cancelled = false;
+    let active = true;
     setPlanLoading(true);
     void (async () => {
       try {
         const draft = await loadMasterplanDraft(resortId);
-        if (cancelled) return;
+        if (!active) return;
         if (draft?.imageDataUrl) setPlanImage(draft.imageDataUrl);
         else setActionError("There's no saved master plan image for this resort yet.");
       } catch {
-        if (!cancelled) setActionError("Couldn't load the master plan image.");
+        if (active) setActionError("Couldn't load the master plan image.");
+        // Let it be tried again; a fetch that failed once and can never
+        // be retried is worse than not having tried at all.
+        planRequested.current = false;
       } finally {
-        if (!cancelled) setPlanLoading(false);
+        // Cleared whether or not this run was superseded. Leaving it set
+        // is what strands the screen on "Loading...".
+        setPlanLoading(false);
       }
     })();
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [georeference, resortId]);
+  }, [georeference, resortId, planImage, planRetry]);
 
   useEffect(() => {
     fixDefaultLeafletIcon();
