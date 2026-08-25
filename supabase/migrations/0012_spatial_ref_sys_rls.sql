@@ -25,6 +25,19 @@
 -- ALTER TABLE then fails on ownership. That is a false alarm we cannot
 -- silence, not a reason to fail the migration and stop the ones after
 -- it - so it's reported and stepped over.
+--
+-- On the live QRDirections project it does fail that way (42501, must be
+-- owner of table spatial_ref_sys), so the advisor warning is permanent
+-- there and is meant to be ignored. Don't go looking for a way around it:
+-- Supabase's advice is to install PostGIS into a separate schema, but the
+-- extension is flagged non-relocatable, so ALTER EXTENSION ... SET SCHEMA
+-- is refused outright and the only route left is dropping and recreating
+-- the extension - which means dropping every location column in the
+-- database first. Not a trade worth making for a table of published
+-- coordinate-system definitions.
+--
+-- This still runs for real anywhere the extension is owned locally, which
+-- is why it stays.
 -- ---------------------------------------------------------------------
 
 do $$
