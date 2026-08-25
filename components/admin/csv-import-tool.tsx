@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Papa from "papaparse";
 import type { ImportResult } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
+import { ImportConfirmation } from "@/components/admin/import-confirmation";
 
 const TEMPLATE = "site_number,label,latitude,longitude\n42,Lakeview Cabin,-31.9505,115.8605\n";
 
@@ -27,16 +28,24 @@ export function CsvImportTool({
   bulkUpsertSites,
 }: {
   resortId: string;
-  bulkUpsertSites: (resortId: string, rows: Record<string, string>[]) => Promise<ImportResult>;
+  bulkUpsertSites: (
+    resortId: string,
+    rows: Record<string, string>[],
+    options?: { dryRun?: boolean }
+  ) => Promise<ImportResult>;
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [fileName, setFileName] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  // What the import would do, worked out before anything is written - see
+  // components/admin/import-confirmation.tsx.
+  const [pending, setPending] = useState<ImportResult | null>(null);
 
   function handleFile(file: File) {
     setFileName(file.name);
     setResult(null);
+    setPending(null);
     Papa.parse<Row>(file, {
       header: true,
       skipEmptyLines: true,
@@ -44,10 +53,30 @@ export function CsvImportTool({
     });
   }
 
+  // Ask what would happen before writing: a CSV of the same numbers moves
+  // every home back onto the surveyed position, losing corrections made by
+  // hand afterwards.
   async function handleImport() {
+    setIsImporting(true);
+    setPending(null);
+    const preview = await bulkUpsertSites(
+      resortId,
+      rows as unknown as Record<string, string>[],
+      { dryRun: true }
+    );
+    setIsImporting(false);
+    if (preview.errors.length > 0) {
+      setResult(preview);
+      return;
+    }
+    setPending(preview);
+  }
+
+  async function confirmImport() {
     setIsImporting(true);
     const res = await bulkUpsertSites(resortId, rows as unknown as Record<string, string>[]);
     setResult(res);
+    setPending(null);
     setIsImporting(false);
   }
 
@@ -108,13 +137,22 @@ export function CsvImportTool({
             </table>
           </div>
 
+          {pending && (
+            <ImportConfirmation
+              preview={pending}
+              busy={isImporting}
+              onConfirm={confirmImport}
+              onCancel={() => setPending(null)}
+            />
+          )}
+
           <button
             type="button"
             onClick={handleImport}
-            disabled={validCount === 0 || isImporting}
+            disabled={validCount === 0 || isImporting || pending !== null}
             className="w-fit rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {isImporting ? "Importing..." : `Import ${validCount} sites`}
+            {isImporting && !pending ? "Checking..." : `Import ${validCount} sites`}
           </button>
 
           {result && (

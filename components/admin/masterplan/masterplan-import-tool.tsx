@@ -22,6 +22,7 @@ import {
 } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/import-masterplan/actions";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import type { ImportResult } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
+import { ImportConfirmation } from "@/components/admin/import-confirmation";
 import "leaflet/dist/leaflet.css";
 import { NeedsReferencePoint } from "@/components/admin/needs-reference-point";
 import { SiteNumberInput } from "@/components/admin/site-number-input";
@@ -55,7 +56,11 @@ export function MasterplanImportTool({
   centerLat: number | null;
   centerLng: number | null;
   defaultZoom: number;
-  bulkUpsertSites: (resortId: string, rows: Record<string, string>[]) => Promise<ImportResult>;
+  bulkUpsertSites: (
+    resortId: string,
+    rows: Record<string, string>[],
+    options?: { dryRun?: boolean }
+  ) => Promise<ImportResult>;
 }) {
   const [step, setStep] = useState<Step>("upload");
   const [isParsing, setIsParsing] = useState(false);
@@ -88,6 +93,13 @@ export function MasterplanImportTool({
   } | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  // What the import would do, worked out before anything is written. Held
+  // here so the write only happens once staff have seen how many homes are
+  // new and how many already-placed ones would be moved back onto the plan.
+  const [pendingImport, setPendingImport] = useState<{
+    rows: Record<string, string>[];
+    preview: ImportResult;
+  } | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileNameRef = useRef<string | null>(null);
@@ -427,10 +439,18 @@ export function MasterplanImportTool({
     setComputedSites((prev) =>
       prev.map((s) => (s.id === id ? { ...s, included: !s.included } : s))
     );
+    // The preview counted a different set of homes - it no longer describes
+    // what would be written.
+    setPendingImport(null);
   }
 
+  // Step one of importing: ask what would happen, write nothing. A second
+  // import of a revised plan is the dangerous one - it silently moves pins
+  // that were corrected by hand on the satellite imagery - so the counts
+  // get shown while it can still be called off.
   async function handleImport() {
     setIsImporting(true);
+    setPendingImport(null);
     const rows = computedSites
       .filter((s) => s.included)
       .map((s) => ({
@@ -438,8 +458,26 @@ export function MasterplanImportTool({
         latitude: String(s.lat),
         longitude: String(s.lng),
       }));
+    const preview = await bulkUpsertSites(resortId, rows, { dryRun: true });
+    setIsImporting(false);
+
+    // Nothing to confirm if the rows can't be written at all - show the
+    // problem straight away rather than asking staff to approve a failure.
+    if (preview.errors.length > 0) {
+      setImportResult(preview);
+      setStep("done");
+      return;
+    }
+    setPendingImport({ rows, preview });
+  }
+
+  async function confirmImport() {
+    if (!pendingImport) return;
+    const { rows } = pendingImport;
+    setIsImporting(true);
     const result = await bulkUpsertSites(resortId, rows);
     setImportResult(result);
+    setPendingImport(null);
     setIsImporting(false);
     setStep("done");
 
@@ -1025,6 +1063,14 @@ export function MasterplanImportTool({
               </tbody>
             </table>
           </div>
+          {pendingImport && (
+            <ImportConfirmation
+              preview={pendingImport.preview}
+              busy={isImporting}
+              onConfirm={confirmImport}
+              onCancel={() => setPendingImport(null)}
+            />
+          )}
           <div className="flex gap-3">
             <button
               type="button"
@@ -1036,10 +1082,12 @@ export function MasterplanImportTool({
             <button
               type="button"
               onClick={handleImport}
-              disabled={includedCount === 0 || isImporting}
+              disabled={includedCount === 0 || isImporting || pendingImport !== null}
               className="rounded-md bg-neutral-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              {isImporting ? "Importing..." : `Import ${includedCount} sites as drafts`}
+              {isImporting && !pendingImport
+                ? "Checking..."
+                : `Import ${includedCount} sites as drafts`}
             </button>
           </div>
         </div>
