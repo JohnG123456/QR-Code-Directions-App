@@ -193,8 +193,8 @@ export function RouteMap({
         )}
         {query.trim() !== "" && matches.length === 0 && !selectedSite && (
           <p className="mt-2 text-sm text-neutral-500">
-            No site {query.trim()} here. Check the number on your paperwork, or
-            ask at reception.
+            No site {query.trim()} here. Check the number you were given, or ask
+            at reception.
           </p>
         )}
       </div>
@@ -311,7 +311,7 @@ function Header({ resortName }: { resortName: string }) {
             {visitorTitle(resortName)}
           </p>
           <p className="text-[12px] leading-tight text-neutral-500">
-            Find your home
+            Find your way around
           </p>
         </div>
       </div>
@@ -325,14 +325,14 @@ function Instructions() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
       <p className="text-[15px] text-neutral-700">
-        Welcome. This page shows you the way from the entrance to any home in
+        Welcome. This page shows you the way from the entrance to any site in
         the resort.
       </p>
       <ol className="mt-4 flex flex-col gap-3">
         {[
           "Type the site number you're looking for in the box above.",
           "Tap it in the list that appears.",
-          "Follow the purple line on the map from the entrance to the home.",
+          "Follow the purple line on the map from the entrance to the site.",
         ].map((step, i) => (
           <li key={step} className="flex gap-3">
             <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#702890] text-[13px] font-semibold text-white">
