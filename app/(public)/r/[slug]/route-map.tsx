@@ -311,7 +311,7 @@ function Header({ resortName }: { resortName: string }) {
             {visitorTitle(resortName)}
           </p>
           <p className="text-[12px] leading-tight text-neutral-500">
-            Find your way around
+            Enter a site number below to get directions
           </p>
         </div>
       </div>

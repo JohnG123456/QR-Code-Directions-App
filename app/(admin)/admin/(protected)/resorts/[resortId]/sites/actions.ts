@@ -90,6 +90,15 @@ export async function addSite(
     };
   }
 
+  // Putting the number back by hand withdraws the note left when it was
+  // deleted - that's someone saying it is a site here after all, and a
+  // later import should treat it as one.
+  await supabase
+    .from("removed_site_numbers")
+    .delete()
+    .eq("resort_id", parsed.data.resortId)
+    .eq("site_number", parsed.data.siteNumber);
+
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/sites`);
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-sites`);
   revalidatePath(`/admin/resorts/${parsed.data.resortId}/capture-map`);
@@ -107,6 +116,13 @@ const importRowSchema = z.object({
 
 export interface ImportResult {
   inserted: number;
+  /** Numbers not already stored: genuinely new homes. */
+  adding?: number;
+  /** Numbers already stored, whose position the import would overwrite -
+   *  which is where hand-corrected positions go. */
+  moving?: number;
+  /** Numbers left out because they were deliberately removed before. */
+  skipped?: number;
   /** Rows that couldn't be written, or a failure that stopped the import. */
   errors: string[];
   /** Things worth telling staff about an import that did succeed. */
@@ -118,7 +134,11 @@ export interface ImportResult {
 // Action any authenticated staff session can call directly.
 export async function bulkUpsertSites(
   resortId: string,
-  rows: Record<string, string>[]
+  rows: Record<string, string>[],
+  /** Works out what the import would do and reports it without writing
+   *  anything, so the tool can say what is about to happen while it can
+   *  still be called off. */
+  options: { dryRun?: boolean } = {}
 ): Promise<ImportResult> {
   const supabase = await createClient();
   const errors: string[] = [];
@@ -169,9 +189,47 @@ export async function bulkUpsertSites(
     return { inserted: 0, errors, warnings };
   }
 
+  // Numbers someone has already decided are not sites here. Left out, or
+  // a plan revision undoes every one of those decisions at once.
+  //
+  // A missing table means migration 0011 hasn't been run: skip nothing
+  // rather than fail the import, which is how it behaved before.
+  const { data: removedRows } = await supabase
+    .from("removed_site_numbers")
+    .select("site_number")
+    .eq("resort_id", resortId);
+  const removed = new Set((removedRows ?? []).map((r) => r.site_number as string));
+
+  const wanted = uniqueRows.filter((row) => !removed.has(row.site_number));
+  const skipped = uniqueRows.length - wanted.length;
+  // Not on a dry run: the confirmation panel words the skipped count
+  // itself, and saying it twice on the one screen just reads as noise.
+  if (skipped > 0 && !options.dryRun) {
+    warnings.push(
+      `${skipped} number${skipped === 1 ? "" : "s"} you previously removed ` +
+        `${skipped === 1 ? "was" : "were"} left out. Add ${
+          skipped === 1 ? "it" : "them"
+        } back by hand if the new plan really does have ${
+          skipped === 1 ? "a home" : "homes"
+        } there.`
+    );
+  }
+
+  const existingNumbers = new Set((existing ?? []).map((site) => site.site_number));
+  const adding = wanted.filter((row) => !existingNumbers.has(row.site_number)).length;
+  const moving = wanted.length - adding;
+
+  if (options.dryRun) {
+    return { inserted: 0, errors, warnings, adding, moving, skipped };
+  }
+
+  if (wanted.length === 0) {
+    return { inserted: 0, errors, warnings, adding, moving, skipped };
+  }
+
   const { error, count } = await supabase
     .from("sites")
-    .upsert(mergeImportRows(resortId, uniqueRows, existing ?? []), {
+    .upsert(mergeImportRows(resortId, wanted, existing ?? []), {
       onConflict: "resort_id,site_number",
       count: "exact",
     });
@@ -182,7 +240,8 @@ export async function bulkUpsertSites(
   }
 
   revalidatePath(`/admin/resorts/${resortId}/sites`);
-  return { inserted: count ?? uniqueRows.length, errors, warnings };
+  revalidatePath(`/admin/resorts/${resortId}/capture-map`);
+  return { inserted: count ?? wanted.length, errors, warnings, adding, moving, skipped };
 }
 
 const restoreSiteSchema = z.object({
@@ -281,10 +340,27 @@ export async function deleteSite(formData: FormData) {
     .from("sites")
     .delete()
     .eq("id", parsed.siteId)
-    .select("id");
+    .select("id, site_number");
 
   if (error) throw new Error(error.message);
   if (!data?.length) throw new Error("That site no longer exists — reload the page.");
+
+  // Leave a note that this number isn't a site here, so re-importing the
+  // plan doesn't put it straight back. Best effort: a note that fails to
+  // save is a nuisance at the next import, not a reason to fail a
+  // deletion that has already happened.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  await supabase.from("removed_site_numbers").upsert(
+    {
+      resort_id: parsed.resortId,
+      site_number: data[0].site_number,
+      removed_at: new Date().toISOString(),
+      removed_by: user?.id ?? null,
+    },
+    { onConflict: "resort_id,site_number" }
+  );
   revalidatePath(`/admin/resorts/${parsed.resortId}/sites`);
   revalidatePath(`/admin/resorts/${parsed.resortId}/capture-map`);
 }
