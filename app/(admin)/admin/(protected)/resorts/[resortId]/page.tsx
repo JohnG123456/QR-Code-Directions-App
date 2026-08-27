@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { resortUrl } from "@/lib/qr/generate";
+import { productionHost, resortUrl } from "@/lib/qr/generate";
 import { ResortSettingsForm } from "@/components/admin/resort-settings-form";
 import { QrPanel } from "@/components/admin/qr-panel";
 import { PlanOverlayPanel } from "@/components/admin/plan-overlay-panel";
@@ -116,7 +116,12 @@ export default async function ResortDetailPage({
         </Link>
       </div>
 
-      <QrPanel resortId={resort.id} url={resortUrl(resort.slug)} slug={resort.slug} />
+      <QrPanel
+        resortId={resort.id}
+        url={resortUrl(resort.slug)}
+        slug={resort.slug}
+        productionHost={productionHost()}
+      />
 
       <PlanOverlayPanel
         resortId={resort.id}
