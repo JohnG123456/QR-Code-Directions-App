@@ -13,12 +13,31 @@ import QRCode from "qrcode";
 // runtime. It is the right default for a code going on a sign: it points
 // at production even when the code is generated from a preview
 // deployment, and it stays correct with no variable set at all.
-export function siteBaseUrl(): string {
-  const explicit = process.env.NEXT_PUBLIC_SITE_URL;
-  if (explicit) return explicit.replace(/\/$/, "");
+// Strips whitespace anywhere in the value, not only at the ends, and
+// drops a trailing slash.
+//
+// A newline on the end of an environment variable is easy to introduce -
+// a stray return when pasting into the Vercel dashboard, or `echo`
+// feeding the CLI - and invisible once it's there. It is not a harmless
+// typo in a QR code. Browsers delete tab and newline characters while
+// parsing a URL, so the link on this page opens perfectly well, while a
+// scanner percent-encodes the newline into the hostname and produces
+// something like `…vercel.app%0A/r/piara-waters`, which resolves
+// nowhere. The result is a code that works for whoever tests it by
+// tapping the link and fails for every person who scans it.
+//
+// No URL has a legitimate reason to carry raw whitespace - a real space
+// is written %20 - so removing it outright is safe.
+function cleanBase(value: string): string {
+  return value.replace(/\s+/g, "").replace(/\/$/, "");
+}
 
-  const production = process.env.VERCEL_PROJECT_PRODUCTION_URL;
-  if (production) return `https://${production.replace(/\/$/, "")}`;
+export function siteBaseUrl(): string {
+  const explicit = cleanBase(process.env.NEXT_PUBLIC_SITE_URL ?? "");
+  if (explicit) return explicit;
+
+  const production = cleanBase(process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "");
+  if (production) return `https://${production}`;
 
   return "http://localhost:3000";
 }
@@ -27,7 +46,7 @@ export function siteBaseUrl(): string {
 // Used to tell staff when a QR code is about to be printed pointing
 // somewhere other than the real site.
 export function productionHost(): string | null {
-  return process.env.VERCEL_PROJECT_PRODUCTION_URL ?? null;
+  return cleanBase(process.env.VERCEL_PROJECT_PRODUCTION_URL ?? "") || null;
 }
 
 export function resortUrl(slug: string): string {
