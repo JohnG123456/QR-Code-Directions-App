@@ -6,10 +6,14 @@ export function QrPanel({
   resortId,
   url,
   slug,
+  productionHost,
 }: {
   resortId: string;
   url: string;
   slug: string;
+  /** The domain this project actually serves in production, when Vercel
+   *  tells us. Null when running anywhere else. */
+  productionHost: string | null;
 }) {
   // A QR code is printed once and lives on a wall for years, so a base
   // URL left at its development default is worth catching before the
@@ -21,9 +25,16 @@ export function QrPanel({
   // and lands nowhere, which a phone's address bar hides because it shows
   // only the domain.
   let wrongPath: string | null = null;
+  // A code pointing at a preview deployment is the worst version of this:
+  // it works for whoever generated it, because their browser is signed in
+  // to Vercel, and shows a blank screen to everyone else - for the life of
+  // the sign. Comparing against the real production domain catches that,
+  // and a stale address, and a typo, without guessing at URL shapes.
+  let wrongHost: string | null = null;
   try {
     const parsed = new URL(url);
     if (parsed.pathname !== `/r/${slug}`) wrongPath = parsed.pathname;
+    if (productionHost && parsed.host !== productionHost) wrongHost = parsed.host;
   } catch {
     wrongPath = url;
   }
@@ -42,12 +53,28 @@ export function QrPanel({
         </p>
       )}
 
+      {wrongHost && !pointsAtLocalhost && (
+        <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">
+          <strong>Don&apos;t print this yet.</strong> It points at{" "}
+          <code className="break-all">{wrongHost}</code>, but this site lives
+          at <code className="break-all">{productionHost}</code>. A code for a
+          preview address only works for someone signed in to Vercel -
+          everyone else gets a blank screen. Set{" "}
+          <code>NEXT_PUBLIC_SITE_URL</code> to{" "}
+          <code className="break-all">https://{productionHost}</code> in Vercel
+          (or clear it), <strong>then redeploy</strong> — the address is baked
+          in at build time, so saving the variable alone changes nothing.
+        </p>
+      )}
+
       {pointsAtLocalhost && (
         <p className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-800">
           <strong>Don&apos;t print this yet.</strong> It points at{" "}
           <code>localhost</code>, which only works on a developer&apos;s own
           machine. Set <code>NEXT_PUBLIC_SITE_URL</code> to the real site
-          address in Vercel and redeploy, then take the code again.
+          address in Vercel and redeploy, then take the code again. Saving
+          the variable is not enough on its own — the address is baked in
+          when the site is built.
         </p>
       )}
       <div className="flex items-center gap-4">
