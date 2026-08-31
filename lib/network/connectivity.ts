@@ -16,6 +16,11 @@ export interface EdgeLink {
 export interface Connectivity {
   reachable: number;
   unreachable: number;
+  /** Which junctions are cut off, in the order they were given. A count
+   *  on its own tells you something is wrong without telling you where,
+   *  and on a 300-junction network "somewhere" is not a place you can
+   *  look - so the ids come back too, for the map to point at. */
+  unreachableIds: string[];
 }
 
 export function countConnectedToEntrance(
@@ -24,7 +29,7 @@ export function countConnectedToEntrance(
   entranceNodeId: string | null
 ): Connectivity {
   if (!entranceNodeId || nodeIds.length === 0) {
-    return { reachable: 0, unreachable: 0 };
+    return { reachable: 0, unreachable: 0, unreachableIds: [] };
   }
 
   const neighbours = new Map<string, string[]>();
@@ -57,5 +62,13 @@ export function countConnectedToEntrance(
   let reachable = 0;
   for (const id of seen) if (known.has(id)) reachable += 1;
 
-  return { reachable, unreachable: known.size - reachable };
+  const unreachableIds: string[] = [];
+  const listed = new Set<string>();
+  for (const id of nodeIds) {
+    if (seen.has(id) || listed.has(id)) continue;
+    listed.add(id);
+    unreachableIds.push(id);
+  }
+
+  return { reachable, unreachable: known.size - reachable, unreachableIds };
 }

@@ -16,6 +16,7 @@ import type {
   SplitEdgeResult,
 } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/network/actions";
 import { countConnectedToEntrance } from "@/lib/network/connectivity";
+import { nearestGap } from "@/lib/network/gap";
 import { closestPointOnPolyline, splitShapeAt, type Pt } from "@/lib/network/snap";
 import "leaflet/dist/leaflet.css";
 
@@ -34,6 +35,18 @@ const SNAP_PIXELS = 24;
 // with transparent space to give it a real target without making the
 // drawing heavier.
 const NODE_HIT_PADDING = 10;
+
+// How close the nearest road has to be before the gap is drawn as a
+// line rather than only described. A junction stranded a few metres
+// short of the road it meant to join is the case worth pointing at; one
+// stranded across the resort is a different mistake, and a hairline
+// stretched over the whole map would say less than the number does.
+const GAP_HINT_METRES = 40;
+
+// Zoom to fly to when showing a disconnected junction. Close enough
+// that a two-metre gap is a visible gap on screen - at the zoom the
+// whole resort is traced at, the two ends sit inside the same dot.
+const GAP_ZOOM = 20;
 
 // Marks the exact point on a road that the next click would join onto.
 // Hollow rather than solid so it reads as "this is about to happen"
@@ -211,6 +224,13 @@ export function remapUndoStack(stack: UndoStep[], idMap: Map<string, string>): U
   });
 }
 
+// Gaps are measured in the range where whole metres round away the
+// answer: "0 m" for a road that stopped 40 cm short is true and useless.
+// Anything wider than a driveway is back to the network-wide format.
+function formatGap(meters: number): string {
+  return meters < 10 ? `${meters.toFixed(1)} m` : formatDistance(meters);
+}
+
 // Cached for the same reason as the site icons: a new icon object on
 // every render makes Leaflet rebuild the marker, which closes any popup
 // open on it. See lib/map/site-icon.ts.
@@ -220,12 +240,13 @@ function nodeIcon(
   isEntrance: boolean,
   isSelected: boolean,
   isChainHead: boolean,
-  isSnapTarget: boolean
+  isSnapTarget: boolean,
+  isUnreachable: boolean
 ) {
-  const key = `${isEntrance}|${isSelected}|${isChainHead}|${isSnapTarget}`;
+  const key = `${isEntrance}|${isSelected}|${isChainHead}|${isSnapTarget}|${isUnreachable}`;
   const cached = nodeIconCache.get(key);
   if (cached) return cached;
-  const icon = buildNodeIcon(isEntrance, isSelected, isChainHead, isSnapTarget);
+  const icon = buildNodeIcon(isEntrance, isSelected, isChainHead, isSnapTarget, isUnreachable);
   nodeIconCache.set(key, icon);
   return icon;
 }
@@ -234,14 +255,21 @@ function buildNodeIcon(
   isEntrance: boolean,
   isSelected: boolean,
   isChainHead: boolean,
-  isSnapTarget: boolean
+  isSnapTarget: boolean,
+  isUnreachable: boolean
 ) {
-  const dot = isEntrance || isSelected || isChainHead ? 16 : 11;
-  const color = isEntrance ? "#7c3aed" : isChainHead ? "#2563eb" : "#111827";
+  const dot = isEntrance || isSelected || isChainHead || isUnreachable ? 16 : 11;
+  const color = isUnreachable
+    ? "#dc2626"
+    : isEntrance
+      ? "#7c3aed"
+      : isChainHead
+        ? "#2563eb"
+        : "#111827";
   // The box is bigger than the dot: the transparent margin is what your
   // finger actually hits, and it's what makes a junction selectable
   // without drawing a target the size of a house on the map.
-  const box = dot + NODE_HIT_PADDING * 2;
+  const box = dot + NODE_HIT_PADDING * 2 + (isUnreachable ? 12 : 0);
   // A ring, drawn only while this is what the next click will join onto,
   // so snapping is something you can see coming rather than discover
   // afterwards.
@@ -253,11 +281,24 @@ function buildNodeIcon(
       "></span>`
     : "";
 
+  // A halo on anything the entrance can't reach. One black dot among
+  // three hundred black dots is not findable by eye at any zoom; the
+  // halo is drawn wide enough to still be a red smudge when the whole
+  // resort is on screen, which is where you're looking from when the
+  // warning appears.
+  const halo = isUnreachable
+    ? `<span style="
+        position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        width:${dot + 22}px;height:${dot + 22}px;border-radius:9999px;
+        border:3px solid #dc2626;background:rgba(220,38,38,0.25);
+      "></span>`
+    : "";
+
   return L.divIcon({
     className: "",
     html: `<span style="
       display:block;position:relative;width:${box}px;height:${box}px;
-    ">${ring}<span style="
+    ">${halo}${ring}<span style="
       position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
       width:${dot}px;height:${dot}px;border-radius:9999px;
       background:${color};border:2px solid white;
@@ -474,6 +515,64 @@ export function NetworkEditor({
     () => countConnectedToEntrance(nodes.map((n) => n.id), edges, entranceId),
     [nodes, edges, entranceId]
   );
+
+  const unreachableIds = useMemo(
+    () => new Set(connectivity.unreachableIds),
+    [connectivity]
+  );
+
+  // Which cut-off junction "Show me" goes to next. Kept as a plain
+  // counter and taken modulo the count so it survives junctions being
+  // fixed or created underneath it: on a network with several breaks,
+  // pressing the button repeatedly walks around all of them rather than
+  // returning to the same one.
+  const [gapCursor, setGapCursor] = useState(0);
+  const nextUnreachableId =
+    connectivity.unreachableIds.length > 0
+      ? connectivity.unreachableIds[gapCursor % connectivity.unreachableIds.length]
+      : null;
+
+  // Whichever cut-off junction is being talked about: the one you've
+  // selected if you've selected one, otherwise the one the button will
+  // take you to next.
+  const focusedUnreachableId =
+    selectedNodeId && unreachableIds.has(selectedNodeId)
+      ? selectedNodeId
+      : nextUnreachableId;
+
+  // The nearest connected road to the junction currently being pointed
+  // at, measured only against roads that are themselves reachable - the
+  // orphan's own roads are the ones it is already joined to, and the
+  // gap that matters is the one to the rest of the network.
+  const focusedUnreachableNode =
+    nodes.find((n) => n.id === focusedUnreachableId) ?? null;
+
+  const focusedGap = useMemo(() => {
+    const node = focusedUnreachableNode;
+    if (!node) return null;
+    const reachableRoads = edges
+      .filter(
+        (e) => !unreachableIds.has(e.fromNodeId) && !unreachableIds.has(e.toNodeId)
+      )
+      .map((e) => ({ id: e.id, shape: e.shape }));
+    return nearestGap({ lat: node.lat, lng: node.lng }, reachableRoads);
+  }, [edges, focusedUnreachableNode, unreachableIds]);
+
+  /** Puts the next disconnected junction on screen, selected and close
+   *  enough to see what it missed. */
+  function showNextGap() {
+    const node = nodes.find((n) => n.id === nextUnreachableId);
+    if (!node) return;
+    setMode("edit");
+    setSelectedNodeId(node.id);
+    setSelectedEdgeId(null);
+    setChainNodeId(null);
+    const map = mapRef.current;
+    if (map) map.flyTo([node.lat, node.lng], Math.max(map.getZoom(), GAP_ZOOM));
+    // Advance only once there's somewhere else to advance to, so on a
+    // single break the button keeps pointing at the break.
+    if (connectivity.unreachableIds.length > 1) setGapCursor((n) => n + 1);
+  }
 
   function pushUndo(step: UndoStep) {
     setUndoNote(null);
@@ -1249,6 +1348,27 @@ export function NetworkEditor({
             />
           )}
 
+          {/* The gap itself: a dashed line from the junction the entrance
+              can't reach to the nearest road it was meant to join. At the
+              zoom the network gets traced at, the two ends are the same
+              pixel - this is what makes the miss visible once you're in
+              close. */}
+          {focusedUnreachableNode && focusedGap && focusedGap.distanceM <= GAP_HINT_METRES && (
+            <Polyline
+              positions={[
+                [focusedUnreachableNode.lat, focusedUnreachableNode.lng],
+                [focusedGap.lat, focusedGap.lng],
+              ]}
+              interactive={false}
+              pathOptions={{
+                color: "#dc2626",
+                weight: 3,
+                opacity: 0.9,
+                dashArray: "5 5",
+              }}
+            />
+          )}
+
           {nodes.map((node) => (
             <Marker
               key={node.id}
@@ -1257,7 +1377,8 @@ export function NetworkEditor({
                 node.id === entranceId,
                 node.id === selectedNodeId,
                 node.id === chainNodeId,
-                snapPreview?.kind === "node" && snapPreview.nodeId === node.id
+                snapPreview?.kind === "node" && snapPreview.nodeId === node.id,
+                unreachableIds.has(node.id)
               )}
               draggable={mode === "edit"}
               eventHandlers={{
@@ -1298,6 +1419,14 @@ export function NetworkEditor({
             {edgesAtSelectedNode.length === 1 ? "" : "s"}
             {selectedNode.id === entranceId ? " — this is the entrance" : ""}
           </span>
+          {unreachableIds.has(selectedNode.id) && (
+            <span className="text-sm text-red-700">
+              Not connected to the entrance
+              {focusedGap ? `, ${formatGap(focusedGap.distanceM)} from the nearest connected road` : ""}
+              . To join it, switch to &ldquo;Draw roads&rdquo;, tap this
+              junction, then tap that road.
+            </span>
+          )}
           {selectedNode.id !== entranceId && (
             <button
               type="button"
@@ -1370,12 +1499,26 @@ export function NetworkEditor({
           </p>
         )}
         {entranceId && connectivity.unreachable > 0 && (
-          <p className="text-amber-700">
-            {connectivity.unreachable} junction
-            {connectivity.unreachable === 1 ? " isn't" : "s aren't"} connected
-            to the entrance — routes to anything out there will fail. Usually a
-            road that stops just short of joining another.
-          </p>
+          <div className="flex flex-wrap items-center gap-2 text-amber-700">
+            <p>
+              {connectivity.unreachable} junction
+              {connectivity.unreachable === 1 ? " isn't" : "s aren't"} connected
+              to the entrance — routes to anything out there will fail. Usually a
+              road that stops just short of joining another.
+              {focusedGap
+                ? ` ${connectivity.unreachable === 1 ? "It's" : "The one shown is"} ${formatGap(
+                    focusedGap.distanceM
+                  )} from the nearest connected road.`
+                : ""}
+            </p>
+            <button
+              type="button"
+              onClick={showNextGap}
+              className="rounded-md border border-amber-400 bg-white px-3 py-1.5 text-sm font-medium text-amber-800"
+            >
+              {connectivity.unreachable === 1 ? "Show me" : "Show me the next one"}
+            </button>
+          </div>
         )}
         {entranceId && connectivity.unreachable === 0 && nodes.length > 0 && (
           <p className="text-green-700">
