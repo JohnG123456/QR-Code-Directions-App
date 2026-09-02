@@ -89,6 +89,32 @@ published to OpenStreetMap) is Phase 2, not built yet.
 - `supabase/migrations/0001_init.sql` — schema, RLS, and public views.
   `graph_nodes`/`graph_edges` are created here but unused until Phase 2.
 
+## The monthly Supabase "table publicly accessible" email
+
+Supabase's security advisor emails roughly monthly with a critical
+`rls_disabled_in_public` finding on this project. **Expect it, and ignore
+it.** The only table it can be reporting is `spatial_ref_sys`, the
+coordinate-system lookup table PostGIS installs into the `public` schema.
+It is the same ~8,500 published rows in every PostGIS database in the
+world, it holds nothing about any resort, and PostGIS grants the public
+`select` on it and nothing else.
+
+Every table this app owns has row-level security switched on and no policy
+granting anon access — see `0001_init.sql` and the migrations after it.
+Visitors read through the `public_*` views alone.
+
+`0012_spatial_ref_sys_rls.sql` tries to turn RLS on for `spatial_ref_sys`
+anyway, so that a real finding never arrives looking like this one. On this
+project it can't: the extension belongs to `supabase_admin`, so the
+`ALTER TABLE` fails with `42501 must be owner of table`. There is no way
+around that short of dropping every location column in the database, which
+is not a trade worth making. Read the comment at the top of that migration
+before spending time on this again.
+
+To confirm the finding is still only that table, open Supabase → Advisors →
+Security and check which table each row names. Anything other than
+`spatial_ref_sys` is real and needs fixing.
+
 ## What's next
 
 - **Phase 2:** an admin tool to digitize each resort's road network
