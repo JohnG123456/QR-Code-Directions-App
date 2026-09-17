@@ -15,6 +15,10 @@ import type { PublicResort, PublicSite } from "@/lib/types";
 import type { PlanOverlayPlacement } from "@/lib/masterplan/published-overlay";
 import type { BoundaryRings } from "@/components/map/outside-mask";
 import { compareSiteNumbers, normaliseSiteNumber } from "@/lib/sites/site-number";
+import {
+  useLiveDirections,
+  type LiveDirections,
+} from "@/lib/navigation/use-live-directions";
 
 interface RouteResult {
   distanceM: number;
@@ -139,6 +143,16 @@ export function RouteMap({
 
   const selectedSite = sites.find((s) => s.id === selectedId) ?? null;
 
+  // Live directions: off until the visitor asks for them, because they
+  // cost a location permission and keep the screen awake, and most
+  // guests scanning at the gate just want to see the map.
+  const live = useLiveDirections(
+    selectedId,
+    selectedSite && selectedSite.lat !== null && selectedSite.lng !== null
+      ? { lat: selectedSite.lat, lng: selectedSite.lng }
+      : null
+  );
+
   // Ask for a route along the actual roads. Until it comes back - and if
   // it never does, because this resort's network hasn't been traced or
   // doesn't reach this site - the straight line still shows, which is
@@ -185,6 +199,7 @@ export function RouteMap({
     (routeState !== "done" || !planImageReady);
 
   function reset() {
+    live.stop();
     setQuery("");
     setSelectedId(null);
     setRoute(null);
@@ -210,6 +225,10 @@ export function RouteMap({
           placeholder="Enter your site number"
           value={query}
           onChange={(e) => {
+            // Typing here clears the chosen site, so it also ends any
+            // trip in progress: following someone to a destination they
+            // have just abandoned is worse than not following them.
+            live.stop();
             setQuery(e.target.value);
             setSelectedId(null);
             setRoute(null);
@@ -226,6 +245,7 @@ export function RouteMap({
                 <button
                   type="button"
                   onClick={() => {
+                    live.stop();
                     setSelectedId(site.id);
                     setQuery(site.site_number);
                     setRevealTimedOut(false);
@@ -255,7 +275,23 @@ export function RouteMap({
       {selectedSite && hasEntrance && (
         <div className="relative flex min-h-0 flex-1 flex-col">
           <div className="shrink-0 px-4 pt-3">
-            {route ? (
+            {live.active && live.arrived ? (
+              <p className="text-[15px] font-semibold text-[#15803d]">
+                You&apos;ve arrived at Site {selectedSite.site_number}.
+              </p>
+            ) : live.active && live.remainingM !== null ? (
+              <p className="text-[15px] text-neutral-800">
+                <strong className="text-[#702890]">
+                  {formatDistance(live.remainingM)}
+                </strong>{" "}
+                to go to Site {selectedSite.site_number}. Follow the purple
+                line.
+              </p>
+            ) : live.active ? (
+              <p className="text-[15px] text-neutral-800">
+                Finding your position…
+              </p>
+            ) : route ? (
               <p className="text-[15px] text-neutral-800">
                 Site {selectedSite.site_number} is a{" "}
                 <strong className="text-[#702890]">
@@ -276,7 +312,37 @@ export function RouteMap({
                 </p>
               )
             )}
+            <LiveNotice live={live} />
           </div>
+
+          {/* Offered only where there is a road network to follow: on a
+              resort without one the route is a straight line, and a dot
+              creeping along a line that ignores the roads would be a
+              worse thing to drive by than the map on its own. */}
+          {resort.is_routable && !live.unsupportedByServer && (
+            <div className="shrink-0 px-4 pt-2">
+              <button
+                type="button"
+                onClick={live.active ? live.stop : live.start}
+                aria-pressed={live.active}
+                className={
+                  live.active
+                    ? "w-full rounded-lg border-2 border-[#702890] px-4 py-2.5 text-[15px] font-medium text-[#702890]"
+                    : "w-full rounded-lg bg-[#702890] px-4 py-2.5 text-[15px] font-medium text-white"
+                }
+              >
+                {live.active ? "Stop following me" : "Follow me as I go"}
+              </button>
+              {/* Said before they start, not after. The whole point of
+                  this feature is that it is used in a moving car, and
+                  the resort's own roads have residents walking on them. */}
+              <p className="mt-1.5 text-[13px] leading-snug text-neutral-500">
+                {live.active
+                  ? "Keep this page open — your phone stops tracking if you lock the screen or switch apps."
+                  : "Start this before you set off, and let a passenger watch it if you can. Please don't read it at the wheel."}
+              </p>
+            </div>
+          )}
 
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 py-2">
             {plan &&
@@ -309,13 +375,27 @@ export function RouteMap({
               entrance={{ lat: resort.entrance_lat!, lng: resort.entrance_lng! }}
               site={{ lat: selectedSite.lat!, lng: selectedSite.lng! }}
               zoom={resort.default_zoom}
-              routePoints={route?.points ?? null}
+              // The live route when there is one, and the route from the
+              // entrance until then - so turning following on never
+              // takes the line away while the first fix is coming in.
+              routePoints={
+                (live.active ? live.route?.points : null) ?? route?.points ?? null
+              }
               siteLabel={`Site ${selectedSite.site_number}`}
               plan={plan}
               planImageUrl={planImageUrl}
               planOpacity={PLAN_VIEWS[planView]}
               bearingDeg={bearingDeg}
               boundary={boundary}
+              livePosition={live.active ? live.fix?.position ?? null : null}
+              liveAccuracyM={live.active ? live.fix?.accuracyM ?? null : null}
+              liveHeadingDeg={live.active ? live.fix?.headingDeg ?? null : null}
+              // Kept on through arrival. Handing the map back to the
+              // fit-the-whole-route framing at the moment someone pulls
+              // up would zoom out to show the journey they have just
+              // finished, which is the opposite of settling; a stopped
+              // car stops moving the map by itself.
+              followLive={live.active}
             />
           </div>
 
@@ -332,6 +412,44 @@ export function RouteMap({
         </p>
       )}
     </div>
+  );
+}
+
+// What live directions have to say for themselves, when that is
+// anything.
+//
+// Every one of these is a case where the dot on the map would otherwise
+// be silently wrong or silently missing, and a guest driving through a
+// resort looking for a house has no way to tell those apart from the map
+// simply being slow. Each says what happened and what is being shown
+// instead.
+function LiveNotice({ live }: { live: LiveDirections }) {
+  if (!live.active && live.message === null) return null;
+
+  const notice = (() => {
+    // Refused, or never answered. The watch is already stopped.
+    if (live.message !== null) return live.message;
+
+    if (!live.active) return null;
+
+    if (live.coarse) {
+      return "Your phone is only giving a rough position, so we can't tell which road you're on. Turn on precise location (Android: Settings → Location → Google Location Accuracy) or follow the route from the entrance.";
+    }
+    if (live.unplaced) {
+      return "We can't place you on a road at this resort just now, so this is the route from the entrance.";
+    }
+    if (live.fix?.grade === "fair") {
+      return "GPS accuracy is poor here — the blue dot may be a house or two out.";
+    }
+    return null;
+  })();
+
+  if (notice === null) return null;
+
+  return (
+    <p role="status" aria-live="polite" className="mt-1.5 text-[13px] leading-snug text-amber-700">
+      {notice}
+    </p>
   );
 }
 

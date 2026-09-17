@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { MapContainer, Marker, Polyline, useMap } from "react-leaflet";
+import { Circle, MapContainer, Marker, Polyline, useMap } from "react-leaflet";
 import type L from "leaflet";
-import { routeEndpointIcon } from "@/lib/map/site-icon";
+import { livePositionIcon, routeEndpointIcon } from "@/lib/map/site-icon";
 import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import { PlanImageOverlay } from "@/components/map/plan-image-overlay";
 import { RotatedMapFrame, type PanTarget } from "@/components/map/rotated-map-frame";
@@ -37,6 +37,26 @@ function FitBoundsOnRouteChange({
   return null;
 }
 
+// Keeps the visitor centred while live directions are running.
+//
+// This replaces the fit-to-route framing rather than joining it: a route
+// that is recomputed every few seconds would otherwise re-frame the map
+// continuously, and a map that keeps jumping back to show the whole
+// journey is no use to someone trying to see the next twenty metres of
+// it.
+function FollowPosition({ position }: { position: LatLng | null }) {
+  const map = useMap();
+  const lat = position?.lat ?? null;
+  const lng = position?.lng ?? null;
+  useEffect(() => {
+    if (lat === null || lng === null) return;
+    // The visitor's own zoom is left alone - they may well have pinched
+    // in to read a house number - so only the centre is moved.
+    map.setView([lat, lng], map.getZoom(), { animate: false });
+  }, [map, lat, lng]);
+  return null;
+}
+
 /** Hands the map out so the rotated frame can pan it. */
 function ExposeMap({ onMap }: { onMap: (map: L.Map | null) => void }) {
   const map = useMap();
@@ -58,6 +78,10 @@ export function LeafletRouteView({
   planOpacity,
   bearingDeg,
   boundary,
+  livePosition,
+  liveAccuracyM,
+  liveHeadingDeg,
+  followLive,
 }: {
   entrance: LatLng;
   site: LatLng;
@@ -77,6 +101,14 @@ export function LeafletRouteView({
   bearingDeg: number;
   /** The resort's outline; everything outside it is greyed out. */
   boundary: BoundaryRings;
+  /** Where the visitor is, while live directions are running. */
+  livePosition: LatLng | null;
+  /** How sure the phone is of that, drawn as a circle around it. */
+  liveAccuracyM: number | null;
+  /** Which way they're pointing, when that's known. */
+  liveHeadingDeg: number | null;
+  /** Whether the map should follow them rather than frame the route. */
+  followLive: boolean;
 }) {
   const entrancePos: [number, number] = [entrance.lat, entrance.lng];
   const sitePos: [number, number] = [site.lat, site.lng];
@@ -143,7 +175,39 @@ export function LeafletRouteView({
         icon={routeEndpointIcon("entrance", "Entrance", bearingDeg)}
       />
       <Marker position={sitePos} icon={routeEndpointIcon("site", siteLabel, bearingDeg)} />
-      <FitBoundsOnRouteChange points={bounds} padding={fitPadding} />
+      {livePosition && (
+        <>
+          {/* How sure the phone is, drawn rather than described. Under a
+              carport or heavy trees this circle covers several houses,
+              and a visitor can see that for themselves far quicker than
+              they can read a number in metres. */}
+          {liveAccuracyM !== null && liveAccuracyM > 0 && (
+            <Circle
+              center={[livePosition.lat, livePosition.lng]}
+              radius={liveAccuracyM}
+              pathOptions={{
+                color: "#2563eb",
+                weight: 1,
+                opacity: 0.35,
+                fillColor: "#2563eb",
+                fillOpacity: 0.1,
+              }}
+            />
+          )}
+          <Marker
+            position={[livePosition.lat, livePosition.lng]}
+            icon={livePositionIcon(liveHeadingDeg)}
+            // Above the route line and both pins: it is the thing on
+            // this map that is moving.
+            zIndexOffset={1000}
+          />
+        </>
+      )}
+      {followLive && livePosition ? (
+        <FollowPosition position={livePosition} />
+      ) : (
+        <FitBoundsOnRouteChange points={bounds} padding={fitPadding} />
+      )}
     </MapContainer>
   );
 

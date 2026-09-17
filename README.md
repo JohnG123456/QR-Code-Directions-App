@@ -24,10 +24,59 @@ deployment (Next.js on Vercel, Postgres/PostGIS on Supabase).
   map showing a straight-line distance/bearing from the resort's entrance
   point to the selected site. This is intentionally approximate — see
   "What's next" below.
+- **Live directions** ("Follow me as I go"): once a site is picked, the
+  visitor can have the route recomputed from where they actually are
+  rather than from the entrance, with their position drawn on the map and
+  the distance counting down as they drive. Opt-in, because it costs a
+  location permission and holds a wake lock. See "Live directions" below
+  for what it does and doesn't do.
 
 Real turn-by-turn routing along each resort's internal roads (a self-owned
 road-network graph + pgRouting, so private layouts never need to be
 published to OpenStreetMap) is Phase 2, not built yet.
+
+## Live directions
+
+Off by default. A visitor who has picked their site gets a "Follow me as
+I go" button; pressing it asks for location permission, draws where they
+are on the map, and re-asks the server for the route from their current
+position as they move.
+
+Apply `supabase/migrations/0015_route_from_live_position.sql` before this
+works. Without it the button hides itself — the API reports the missing
+function as "no live route" rather than as an error, so a deployment that
+hasn't been migrated still gives directions from the entrance.
+
+**What it does not do, by design:**
+
+- **It stops when the phone does.** `watchPosition` is suspended when the
+  browser is backgrounded or the screen locks, on both iOS and Android,
+  and the web has no background geolocation. The page takes a wake lock
+  (Chrome on Android, Safari from iOS 16.4) to stop the screen sleeping
+  on its own, but a visitor who switches apps stops being followed.
+  Navigation with the screen off would need a native app.
+- **It doesn't claim more than GPS knows.** A fix worse than 100 m —
+  which on Android is what Chrome returns when Location is set to
+  battery-saving or GPS is off — is shown as a dot with its accuracy
+  circle but is never routed from, because the roads here are about six
+  metres wide and twenty-five metres apart and a fix that vague would
+  place someone confidently on the wrong street. Between 25 m and 100 m
+  the page says accuracy is poor and carries on.
+- **It doesn't give turn-by-turn instructions.** No street names, no
+  "turn left", no voice. See "What's next".
+- **It doesn't snap the dot to the road.** The route is computed from the
+  nearest road, but the dot is drawn at the raw fix. Snapping it would
+  look tidier and would sometimes be a lie.
+
+**Worth knowing before it goes in front of guests:** this is a screen
+used in a moving car, on resort roads that residents walk on. The page
+asks visitors to start it before setting off and not to read it at the
+wheel, but that is a label, not a control. Worth a conversation with the
+resort operators before it is switched on.
+
+An in-app browser — a QR code scanned from inside Facebook, Instagram or
+similar — may never pass the location prompt through. The page reports
+that as a refused permission and suggests opening it in Chrome or Safari.
 
 ## Setup
 
@@ -77,6 +126,12 @@ published to OpenStreetMap) is Phase 2, not built yet.
   session-refresh helper used by `proxy.ts`.
 - `lib/geo/distance.ts` — Haversine distance/bearing/walk-time helpers used
   by the Phase 1 straight-line visitor view.
+- `lib/navigation/` — live directions. `live-route.ts` holds the pure
+  judgement calls (when a fix is too vague to trust, how far off the line
+  counts as off it, when to ask the server for a new route) with the
+  reasoning for each threshold; `use-live-position.ts` wraps
+  `watchPosition`; `use-live-directions.ts` drives the loop;
+  `use-wake-lock.ts` keeps the screen on.
 - `lib/geo/local-projection.ts` / `lib/geo/similarity-transform.ts` — the
   math behind master plan calibration: project lat/lng to local metres
   around a reference point, then fit a least-squares scale/rotation/
@@ -92,6 +147,11 @@ published to OpenStreetMap) is Phase 2, not built yet.
   addon breaks its own runtime binary resolution.
 - `supabase/migrations/0001_init.sql` — schema, RLS, and public views.
   `graph_nodes`/`graph_edges` are created here but unused until Phase 2.
+- `supabase/migrations/0015_route_from_live_position.sql` — `route_from_point`,
+  the routing function behind live directions. Attaches an arbitrary
+  position to the nearest road and routes from whichever end of it is
+  shorter door-to-door, and refuses any position that isn't at this
+  resort.
 
 ## What's next
 
@@ -99,6 +159,12 @@ published to OpenStreetMap) is Phase 2, not built yet.
   (click to place intersections, connect them into paths, snap each site
   to the network), and a `pgr_dijkstra`-backed routing endpoint that
   replaces the straight line with a real routed path + walk-time estimate.
-- **Phase 3:** live-GPS origin (route from the visitor's current position,
-  not just the entrance), PWA installability, offline queueing for the
-  GPS capture tool, multi-entrance support.
+- **Phase 3:** PWA installability, offline queueing for the GPS capture
+  tool, multi-entrance support.
+- **Turn-by-turn:** spoken and written manoeuvres ("turn left into Karri
+  Loop in 80 m"). Needs street names on `graph_edges`, which nothing
+  captures yet — the master plans carry them, so it is per-resort data
+  entry — plus a manoeuvre generator over the existing edge geometry and
+  the Web Speech API. Deliberately not built until live directions have
+  been watched in use: these drives are 200–600 m, and the moving dot may
+  well be enough on its own.

@@ -165,3 +165,65 @@ function buildRouteEndpointIcon(
     iconAnchor: [9, 9],
   });
 }
+
+// Where the visitor is right now, while live directions are running.
+//
+// Blue rather than the resort's purple, because it is the one thing on
+// the map that is not part of the resort: purple is the route and the
+// entrance, and a guest should be able to tell "you" from "the way" at a
+// glance while driving.
+//
+// The arrow is only drawn when the heading is trustworthy - see
+// usableHeading - so a stationary car gets a plain dot rather than one
+// pointing confidently in an invented direction.
+// Takes no map bearing, unlike the pins above, and that is the whole
+// trick: the marker sits inside the map, so it has already been turned
+// by -bearing along with everything else. Rotating it by the plain
+// compass heading therefore lands it on screen at heading-minus-bearing,
+// which is exactly where the visitor is pointing relative to the way the
+// map is drawn. The pins need the bearing because they are counteracting
+// that same rotation to keep their words upright.
+export function livePositionIcon(headingDeg: number | null) {
+  // Rounded before it reaches the cache key. A heading arrives as a raw
+  // float and changes on every fix, so keying on it unrounded would mint
+  // a fresh icon a second and churn through the cache for a difference
+  // nobody can see at 20 pixels across.
+  const stepped = headingDeg === null ? null : Math.round(headingDeg / 5) * 5;
+  return cachedIcon(`live|${stepped ?? "none"}`, () => buildLivePositionIcon(stepped));
+}
+
+function buildLivePositionIcon(headingDeg: number | null) {
+  const size = 20;
+  const arrow =
+    headingDeg === null
+      ? ""
+      : `<span style="
+          position:absolute;
+          left:50%;
+          top:50%;
+          width:0;
+          height:0;
+          border-left:6px solid transparent;
+          border-right:6px solid transparent;
+          border-bottom:14px solid #1d4ed8;
+          transform:translate(-50%,-50%) rotate(${headingDeg}deg) translateY(-15px);
+          filter:drop-shadow(0 1px 1px rgba(0,0,0,0.35));
+        "></span>`;
+
+  return L.divIcon({
+    className: "",
+    html: `<span style="position:relative;display:block;width:${size}px;height:${size}px;">
+      ${arrow}
+      <span style="
+        position:absolute;
+        inset:0;
+        border-radius:9999px;
+        background:#2563eb;
+        border:3px solid white;
+        box-shadow:0 1px 4px rgba(0,0,0,0.5);
+      "></span>
+    </span>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+  });
+}
