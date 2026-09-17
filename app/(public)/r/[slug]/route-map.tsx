@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import dynamic from "next/dynamic";
 import {
@@ -35,6 +35,22 @@ const PLAN_VIEWS = {
 } as const;
 
 type PlanView = keyof typeof PLAN_VIEWS;
+
+// How long the page will hold the finished map back while it waits for
+// the plan drawing and the walking route.
+//
+// Showing the map the moment it can be shown meant a guest watched it
+// assemble itself: satellite imagery, then a straight line to the site,
+// then the drawing on top, then the line snapping onto the roads. Every
+// one of those is the page working correctly, and all of them together
+// read as something broken. So the pieces are gathered behind a plain
+// screen and arrive at once.
+//
+// Capped, though, because a held screen with nothing behind it is worse
+// than a plain one. If the route or the drawing is slow, the map appears
+// as it used to and finishes assembling in the open - the same behaviour
+// as before, just rarer.
+const REVEAL_TIMEOUT_MS = 6000;
 
 const PLAN_VIEW_LABELS: Record<PlanView, string> = {
   plan: "Site plan",
@@ -72,6 +88,31 @@ export function RouteMap({
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [routeState, setRouteState] = useState<"idle" | "loading" | "done">("idle");
   const [planView, setPlanView] = useState<PlanView>("plan");
+  // A resort with no published plan has nothing to wait for.
+  const [planImageReady, setPlanImageReady] = useState(planImageUrl === null);
+  const [revealTimedOut, setRevealTimedOut] = useState(false);
+
+  // Fetched on arrival rather than when a site is picked, so it is
+  // usually already in the browser's cache by the time anyone has
+  // finished typing a number. `window.Image` because `Image` in this
+  // file is next/image.
+  useEffect(() => {
+    if (!planImageUrl) return;
+    const image = new window.Image();
+    // Loaded or failed, the wait is over either way: a drawing that
+    // won't load is a reason to show the satellite view, not a reason to
+    // hold a guest at a blank screen.
+    image.onload = () => setPlanImageReady(true);
+    image.onerror = () => setPlanImageReady(true);
+    image.src = planImageUrl;
+  }, [planImageUrl]);
+
+  // Gives up on its own, once per site looked up.
+  useEffect(() => {
+    if (!selectedId) return;
+    const timer = setTimeout(() => setRevealTimedOut(true), REVEAL_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [selectedId]);
 
   const matches = useMemo(() => {
     if (!query.trim()) return [];
@@ -136,11 +177,19 @@ export function RouteMap({
         })()
       : null;
 
+  // Everything the finished map needs is either here or it isn't coming.
+  const preparing =
+    selectedSite !== null &&
+    hasEntrance &&
+    !revealTimedOut &&
+    (routeState !== "done" || !planImageReady);
+
   function reset() {
     setQuery("");
     setSelectedId(null);
     setRoute(null);
     setRouteState("idle");
+    setRevealTimedOut(false);
   }
 
   return (
@@ -165,6 +214,7 @@ export function RouteMap({
             setSelectedId(null);
             setRoute(null);
             setRouteState("idle");
+            setRevealTimedOut(false);
           }}
           autoFocus
           className="w-full rounded-lg border-2 border-[#702890]/25 px-4 py-3 text-base text-neutral-900 placeholder:text-neutral-400 focus:border-[#702890] focus:outline-none"
@@ -178,6 +228,7 @@ export function RouteMap({
                   onClick={() => {
                     setSelectedId(site.id);
                     setQuery(site.site_number);
+                    setRevealTimedOut(false);
                     void loadRoute(site.id);
                   }}
                   className="flex w-full justify-between px-4 py-3 text-left text-neutral-900 hover:bg-[#702890]/5"
@@ -202,7 +253,7 @@ export function RouteMap({
       {!selectedSite && <Instructions />}
 
       {selectedSite && hasEntrance && (
-        <>
+        <div className="relative flex min-h-0 flex-1 flex-col">
           <div className="shrink-0 px-4 pt-3">
             {route ? (
               <p className="text-[15px] text-neutral-800">
@@ -267,7 +318,11 @@ export function RouteMap({
               boundary={boundary}
             />
           </div>
-        </>
+
+          {/* Over the map and the line above it, under the search
+              results, which stay usable throughout. */}
+          {preparing && <Preparing siteNumber={selectedSite.site_number} />}
+        </div>
       )}
 
       {selectedSite && !hasEntrance && (
@@ -316,6 +371,54 @@ function Header({ resortName }: { resortName: string }) {
         </div>
       </div>
     </header>
+  );
+}
+
+// The screen a guest sees while the map is being put together.
+//
+// Deliberately the same furniture as the header they are already looking
+// at - the resort's own mark, the same purple - so it reads as the page
+// still being the page, rather than a gap in it.
+function Preparing({ siteNumber }: { siteNumber: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="absolute inset-0 z-[900] flex flex-col items-center justify-center gap-6 bg-white px-6 text-center"
+    >
+      <Image
+        src="/brand/providence-lifestyle.png"
+        alt=""
+        width={578}
+        height={289}
+        className="h-16 w-auto"
+      />
+      <svg
+        viewBox="0 0 48 48"
+        className="h-9 w-9 animate-spin text-[#702890] motion-reduce:animate-none"
+        aria-hidden="true"
+      >
+        <circle
+          cx="24"
+          cy="24"
+          r="20"
+          fill="none"
+          stroke="currentColor"
+          strokeOpacity="0.2"
+          strokeWidth="5"
+        />
+        <path
+          d="M24 4a20 20 0 0 1 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="5"
+          strokeLinecap="round"
+        />
+      </svg>
+      <p className="text-[15px] leading-snug text-neutral-700">
+        Finding the way to Site {siteNumber}…
+      </p>
+    </div>
   );
 }
 
