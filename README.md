@@ -44,9 +44,19 @@ are on the map, and re-asks the server for the route from their current
 position as they move.
 
 Apply `supabase/migrations/0015_route_from_live_position.sql` before this
-works. Without it the button hides itself — the API reports the missing
-function as "no live route" rather than as an error, so a deployment that
-hasn't been migrated still gives directions from the entrance.
+works. Until it is applied the button is never drawn: the page asks the
+database on the server, while it is being built, whether it can route
+from a live position, and a deployment that can't simply doesn't offer
+it. Directions from the entrance are unaffected either way.
+
+That check is on the server deliberately. Finding out at the point of
+use meant the button was offered to everyone and only withdrawn once
+someone had pressed it — after the browser had asked them for a location
+permission. Offering a feature, taking a permission for it and then
+removing it is worse than never offering it.
+
+The answer is only cached once it is yes, so applying the migration
+switches live directions on by itself, with no redeploy.
 
 **What it does not do, by design:**
 

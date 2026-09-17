@@ -28,6 +28,13 @@
 -- it. Consumer GPS in a car is good to 5-15m under open sky and worse
 -- under a carport or mature trees, so this has to be generous; past it
 -- the honest answer is that we do not know which road they are on.
+--
+-- This also doubles as the visitor page's capability probe: it takes no
+-- arguments and does no work, so asking whether it answers is a cheap
+-- way to ask whether this migration has been applied at all. Keep it in
+-- this migration, alongside route_from_point - see
+-- lib/navigation/server-support.ts, which would quietly start lying if
+-- the two were ever separated.
 create or replace function public.live_snap_limit_m()
 returns double precision
 language sql

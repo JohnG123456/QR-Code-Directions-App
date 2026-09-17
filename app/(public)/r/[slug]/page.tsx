@@ -3,6 +3,7 @@ import { fetchPublicPlanPlacement } from "@/lib/masterplan/published-overlay";
 import { fetchResortBoundary } from "@/lib/geo/resort-boundary";
 import { resolveMapBearing } from "@/lib/geo/map-bearing";
 import { fetchMapBearingOverride, fetchRoadGridDegrees } from "@/lib/resorts/public-resort";
+import { fetchLiveDirectionsSupport } from "@/lib/navigation/server-support";
 import { RouteMap } from "./route-map";
 
 // Anything that goes wrong here used to end up as the same bare 404.
@@ -89,12 +90,18 @@ export default async function VisitorResortPage({
   // The plan drawing, if staff have published one. Only its placement is
   // read here - a handful of numbers; the image comes down as its own
   // cacheable request from /api/r/<slug>/plan.
-  const [plan, boundary, bearingOverride, roadGridDeg] = await Promise.all([
-    fetchPublicPlanPlacement(supabase, resort.id),
-    fetchResortBoundary(supabase, resort.id),
-    fetchMapBearingOverride(supabase, resort.id),
-    fetchRoadGridDegrees(supabase, resort.id),
-  ]);
+  //
+  // Live directions are asked about here too, so the page knows whether
+  // it can offer them before it draws the button rather than after a
+  // guest has pressed it.
+  const [plan, boundary, bearingOverride, roadGridDeg, liveDirections] =
+    await Promise.all([
+      fetchPublicPlanPlacement(supabase, resort.id),
+      fetchResortBoundary(supabase, resort.id),
+      fetchMapBearingOverride(supabase, resort.id),
+      fetchRoadGridDegrees(supabase, resort.id),
+      fetchLiveDirectionsSupport(supabase),
+    ]);
 
   // Which way the map is turned. Normally the way you're facing as you
   // walk in from the entrance; a resort can override it where that
@@ -124,6 +131,7 @@ export default async function VisitorResortPage({
       }
       bearingDeg={bearingDeg}
       boundary={boundary}
+      liveDirectionsAvailable={liveDirections}
     />
   );
 }

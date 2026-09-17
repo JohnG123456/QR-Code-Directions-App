@@ -73,6 +73,7 @@ export function RouteMap({
   planImageUrl,
   bearingDeg,
   boundary,
+  liveDirectionsAvailable,
 }: {
   resort: PublicResort;
   sites: PublicSite[];
@@ -83,6 +84,10 @@ export function RouteMap({
   bearingDeg: number;
   /** The resort's outline; everything outside it is greyed out. */
   boundary: BoundaryRings;
+  /** Whether this deployment's database can route from a live position.
+   *  Established on the server, so the button is never offered by a
+   *  page that cannot deliver it. */
+  liveDirectionsAvailable: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -326,8 +331,14 @@ export function RouteMap({
           {/* Offered only where there is a road network to follow: on a
               resort without one the route is a straight line, and a dot
               creeping along a line that ignores the roads would be a
-              worse thing to drive by than the map on its own. */}
-          {resort.is_routable && !live.unsupportedByServer && (
+              worse thing to drive by than the map on its own.
+              
+              And only where the database can actually do it. That is
+              settled on the server before the page is drawn; the
+              runtime check stays as well, for the case where the
+              function goes away between the page loading and the button
+              being pressed. */}
+          {resort.is_routable && liveDirectionsAvailable && !live.unsupportedByServer && (
             <div className="shrink-0 px-4 pt-2">
               <button
                 type="button"

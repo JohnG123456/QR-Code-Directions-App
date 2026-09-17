@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { MISSING_FUNCTION_CODES } from "@/lib/navigation/missing-function";
 
 // The route a visitor gets after picking their site number.
 //
@@ -57,8 +58,7 @@ export async function GET(request: Request) {
     // A resort whose database hasn't had 0015 applied yet still has to
     // be able to give directions from the entrance, so a missing live
     // function is reported as "no live route" rather than as a failure.
-    // Postgres raises undefined_function as 42883.
-    if (fromLive && error.code === "42883") {
+    if (fromLive && MISSING_FUNCTION_CODES.has(error.code ?? "")) {
       return NextResponse.json({ route: null, liveUnavailable: true });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
