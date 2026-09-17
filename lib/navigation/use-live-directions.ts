@@ -104,7 +104,8 @@ export function useLiveDirections(
     requested &&
     status !== "denied" &&
     status !== "unavailable" &&
-    status !== "unsupported";
+    status !== "unsupported" &&
+    status !== "stopped-idle";
 
   // A coarse fix is not evidence of anything. On Android with Location
   // set to battery-saving, or GPS off, Chrome returns a cell-tower

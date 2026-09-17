@@ -41,6 +41,14 @@ export const MAX_ROUTE_AGE_MS = 20000;
 /** Or after moving this far from wherever the current route was computed. */
 export const RECOMPUTE_AFTER_MOVING_M = 40;
 
+/** How far counts as having moved at all, rather than as a fix wobbling
+ *  about a parked car. Above typical GPS jitter, well below a drive. */
+export const STATIONARY_M = 10;
+
+/** How long a visitor can stay put before the page stops following them
+ *  on its own. */
+export const IDLE_STOP_MS = 5 * 60 * 1000;
+
 export type AccuracyGrade = "good" | "fair" | "coarse";
 
 /**
@@ -135,8 +143,20 @@ export function shouldRecomputeRoute({
   if (now - routedAt < MIN_RECOMPUTE_MS) return false;
 
   if (offRouteFixes >= OFF_ROUTE_FIXES) return true;
-  if (now - routedAt >= MAX_ROUTE_AGE_MS) return true;
-  return distanceMeters(routedFrom, position) >= RECOMPUTE_AFTER_MOVING_M;
+
+  const movedM = distanceMeters(routedFrom, position);
+  if (movedM >= RECOMPUTE_AFTER_MOVING_M) return true;
+
+  // The age trigger only applies to someone who is actually moving.
+  //
+  // It is here because a route slowly stops describing where a visitor
+  // is as they drive along it. A parked car is not that case: nothing
+  // about its route has gone stale, and re-asking on a timer alone turns
+  // a page left open on a seat into a request every twenty seconds for
+  // as long as the phone is awake - which, since this feature holds a
+  // wake lock, could be all afternoon. Movement is what makes a route
+  // stale, so movement is what re-asks for one.
+  return now - routedAt >= MAX_ROUTE_AGE_MS && movedM >= STATIONARY_M;
 }
 
 /** Close enough to the site to say so. */

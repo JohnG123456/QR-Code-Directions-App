@@ -2,7 +2,14 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { LatLng } from "@/lib/geo/distance";
-import { gradeAccuracy, usableHeading, type AccuracyGrade } from "./live-route";
+import {
+  gradeAccuracy,
+  usableHeading,
+  IDLE_STOP_MS,
+  STATIONARY_M,
+  type AccuracyGrade,
+} from "./live-route";
+import { distanceMeters, type LatLng as Point } from "@/lib/geo/distance";
 
 // The browser's position stream, in the shape the visitor page wants it.
 //
@@ -19,7 +26,9 @@ export type LivePositionStatus =
   | "starting"
   | "active"
   | "denied"
-  | "unavailable";
+  | "unavailable"
+  /** Gave up on its own after a long time without moving. */
+  | "stopped-idle";
 
 export interface LiveFix {
   position: LatLng;
@@ -47,6 +56,11 @@ export function useLivePosition(): LivePosition {
   const [message, setMessage] = useState<string | null>(null);
   const watchId = useRef<number | null>(null);
 
+  // The last place the visitor actually was, as opposed to the last
+  // place a fix claimed they were. Used to notice a phone that has been
+  // put down: see the idle check in the watch callback.
+  const lastMoved = useRef<{ position: Point; at: number } | null>(null);
+
   // Support is not checked up front, deliberately. `navigator` doesn't
   // exist on the server, so testing for it during render would make the
   // first client render disagree with the markup sent down, and testing
@@ -62,6 +76,7 @@ export function useLivePosition(): LivePosition {
     setStatus((current) => (current === "unsupported" ? current : "idle"));
     setFix(null);
     setMessage(null);
+    lastMoved.current = null;
   }, []);
 
   const start = useCallback(() => {
@@ -76,19 +91,47 @@ export function useLivePosition(): LivePosition {
 
     setStatus("starting");
     setMessage(null);
+    lastMoved.current = null;
 
     watchId.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude, accuracy, heading, speed } = position.coords;
+        const here = { lat: latitude, lng: longitude };
+        const now = Date.now();
+
+        // Stop following a visitor who has stopped going anywhere.
+        //
+        // Arrival already ends the recomputing, but only for someone who
+        // got within a few metres of the door. Somebody who parks across
+        // the street, or gives up and walks in, leaves a page holding a
+        // wake lock and a live receiver for as long as the battery
+        // lasts. These drives take a minute or two, so five minutes
+        // without moving is not a pause in the journey - it is over.
+        const since = lastMoved.current;
+        if (since === null || distanceMeters(since.position, here) >= STATIONARY_M) {
+          lastMoved.current = { position: here, at: now };
+        } else if (now - since.at >= IDLE_STOP_MS) {
+          if (watchId.current !== null) {
+            navigator.geolocation.clearWatch(watchId.current);
+            watchId.current = null;
+          }
+          lastMoved.current = null;
+          setStatus("stopped-idle");
+          setMessage(
+            "Stopped following you, since you haven't moved for a while. Tap Follow me as I go to start again."
+          );
+          return;
+        }
+
         setStatus("active");
         setMessage(null);
         setFix({
-          position: { lat: latitude, lng: longitude },
+          position: here,
           accuracyM: Number.isFinite(accuracy) ? accuracy : null,
           grade: gradeAccuracy(Number.isFinite(accuracy) ? accuracy : null),
           headingDeg: usableHeading(heading, speed),
           speedMs: Number.isFinite(speed) ? speed : null,
-          at: Date.now(),
+          at: now,
         });
       },
       (error) => {

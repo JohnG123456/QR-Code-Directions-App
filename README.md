@@ -68,6 +68,44 @@ hasn't been migrated still gives directions from the entrance.
   nearest road, but the dot is drawn at the raw fix. Snapping it would
   look tidier and would sometimes be a lie.
 
+### What it costs to run
+
+One visitor drive is about **12 route requests** — one Vercel function
+invocation and one Supabase RPC each, returning a couple of KB of
+polyline. Fixes arrive from the receiver roughly once a second, but a
+request per fix would be a lot of traffic to move a number by three
+metres, so the route is only re-asked for when it has stopped being the
+right answer. At 100 drives a day that is roughly 36,000 invocations a
+month, which is not a number worth watching.
+
+The thing that *would* be worth watching is a request loop with no stop
+condition, so there are two:
+
+- **A stationary visitor makes no requests at all.** The re-ask-on-age
+  rule requires movement as well as elapsed time. Without that, a phone
+  left on a car seat with the page open re-asked every 20 seconds for as
+  long as it stayed awake — and since this feature holds a wake lock,
+  that is all afternoon. Measured: 8 hours parked went from 1,440
+  requests to 0.
+- **A forgotten session stops itself.** Five minutes without moving more
+  than 10 m clears the watch and releases the wake lock. Arrival already
+  ended the recomputing, but only for someone who got within 25 m of the
+  door — parking across the street or giving up and walking in did not.
+
+Neither of these is about the money, at these volumes. They are about
+the failure mode: a loop whose cost is set by how long a page is left
+open rather than by how many people use it is the kind that only shows
+up on a bill.
+
+**Map tiles are the one metered thing this makes heavier**, and they
+were already here. The basemap is Esri's World Imagery endpoint,
+unauthenticated. Following the visitor pans the map continuously, so a
+drive pulls perhaps three or four times the tiles a static map view
+does — still only a few dozen, because Leaflet fetches a tile when it
+scrolls into view and then keeps it. If usage ever grows enough to
+matter, the fix is an Esri API key or a different provider, not a change
+to this feature.
+
 ### Testing it without going to a resort
 
 Set `NEXT_PUBLIC_POSITION_SIM=1` on Vercel's **Preview** environment
