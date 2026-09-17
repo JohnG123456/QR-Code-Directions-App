@@ -11,6 +11,19 @@ import { z } from "zod";
 // request body limit.
 const MAX_IMAGE_CHARS = 8_000_000;
 
+// A calibration point pairs a spot on the plan image with the real place
+// it sits. `world` is a coordinate; the metres form is how points were
+// stored before 0013 and is still accepted, because a tab left open on
+// the old tool keeps autosaving it and a rejected autosave loses
+// somebody's afternoon. See lib/geo/plan-calibration.ts.
+export const calibrationPointSchema = z.object({
+  plan: z.object({ x: z.number(), y: z.number() }),
+  world: z.union([
+    z.object({ lat: z.number(), lng: z.number() }),
+    z.object({ x: z.number(), y: z.number() }),
+  ]),
+});
+
 export const draftPayloadSchema = z.object({
   fileName: z.string().nullable(),
   step: z.string().min(1),
@@ -25,12 +38,7 @@ export const draftPayloadSchema = z.object({
   labels: z.array(
     z.object({ id: z.string(), text: z.string(), x: z.number(), y: z.number() })
   ),
-  pairs: z.array(
-    z.object({
-      plan: z.object({ x: z.number(), y: z.number() }),
-      world: z.object({ x: z.number(), y: z.number() }),
-    })
-  ),
+  pairs: z.array(calibrationPointSchema),
   lastImportedAt: z.number().nullable().optional(),
 });
 

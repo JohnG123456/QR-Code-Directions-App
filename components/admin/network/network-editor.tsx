@@ -9,7 +9,7 @@ import { siteDivIcon } from "@/lib/map/site-icon";
 import { georeferencePlan } from "@/lib/geo/plan-georeference";
 import { distanceMeters, formatDistance } from "@/lib/geo/distance";
 import { loadMasterplanDraft } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/import-masterplan/actions";
-import type { PointPair } from "@/lib/geo/similarity-transform";
+import type { StoredCalibrationPoint } from "@/lib/geo/plan-calibration";
 import type { SiteStatus } from "@/lib/types";
 import type {
   NetworkActionState,
@@ -341,7 +341,7 @@ export function NetworkEditor({
   /** Generated site spurs, drawn for context but not editable here. */
   connectors: [number, number][][];
   planCalibration: {
-    pairs: PointPair[];
+    pairs: StoredCalibrationPoint[];
     imageWidth: number;
     imageHeight: number;
     fileName: string | null;

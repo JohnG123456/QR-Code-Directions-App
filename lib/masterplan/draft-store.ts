@@ -15,6 +15,8 @@
 // this device" convenience, not a substitute for finishing the import,
 // which is what actually writes the sites to the database.
 
+import type { StoredCalibrationPoint } from "@/lib/geo/plan-calibration";
+
 const DB_NAME = "masterplan-drafts";
 const DB_VERSION = 1;
 const STORE = "drafts";
@@ -33,7 +35,7 @@ export interface MasterplanDraft {
   imageWidth: number;
   imageHeight: number;
   labels: { id: string; text: string; x: number; y: number }[];
-  pairs: { plan: { x: number; y: number }; world: { x: number; y: number } }[];
+  pairs: StoredCalibrationPoint[];
 }
 
 function openDb(): Promise<IDBDatabase> {

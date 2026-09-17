@@ -3,8 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, Marker, useMapEvents } from "react-leaflet";
 import type { ExtractedPlan, ExtractedLabel } from "@/lib/masterplan/extract-labels-server";
-import { fitPlanToWorldTransform, type PointPair } from "@/lib/geo/similarity-transform";
-import { toLocalMeters, fromLocalMeters } from "@/lib/geo/local-projection";
+import { fitPlanToWorldTransform } from "@/lib/geo/similarity-transform";
+import {
+  calibrationOrigin,
+  normalizeCalibrationPoints,
+  toPointPairs,
+  type CalibrationPoint,
+  type StoredCalibrationPoint,
+} from "@/lib/geo/plan-calibration";
+import { fromLocalMeters } from "@/lib/geo/local-projection";
 import { siteDivIcon } from "@/lib/map/site-icon";
 import { ZoomablePlan } from "@/components/admin/masterplan/zoomable-plan";
 import {
@@ -80,7 +87,7 @@ export function MasterplanImportTool({
   // them on to check specific ones.
   const [showNumbers, setShowNumbers] = useState(false);
 
-  const [pairs, setPairs] = useState<PointPair[]>([]);
+  const [pairs, setPairs] = useState<CalibrationPoint[]>([]);
   const [pendingPlanPoint, setPendingPlanPoint] = useState<{ x: number; y: number } | null>(null);
   const [calibrationError, setCalibrationError] = useState<string | null>(null);
 
@@ -198,7 +205,9 @@ export function MasterplanImportTool({
       />
     );
   }
-  const reference = { lat: centerLat, lng: centerLng };
+  // Only for reading drafts calibrated before 0013, whose points were
+  // recorded as metres from this point rather than as coordinates.
+  const legacyReference = { lat: centerLat, lng: centerLng };
   const selectedLabel = labels.find((l) => l.id === selectedLabelId) ?? null;
 
   // Sends the draft as it stands to the account, image and all. The
@@ -212,7 +221,7 @@ export function MasterplanImportTool({
     imageWidth: number;
     imageHeight: number;
     labels: ExtractedLabel[];
-    pairs: PointPair[];
+    pairs: StoredCalibrationPoint[];
     lastImportedAt?: number | null;
   }) {
     setUploadingToAccount(true);
@@ -228,7 +237,10 @@ export function MasterplanImportTool({
           imageWidth: draft.imageWidth,
           imageHeight: draft.imageHeight,
           labels: draft.labels,
-          pairs: draft.pairs,
+          // A draft that only ever lived in this browser can still be
+          // holding pre-0013 offsets. Convert on the way up so the
+          // account copy is the shape that stays put.
+          pairs: normalizeCalibrationPoints(draft.pairs, legacyReference),
           lastImportedAt: draft.lastImportedAt ?? null,
         }),
       });
@@ -283,7 +295,7 @@ export function MasterplanImportTool({
       labels: foundDraft.labels,
     });
     setLabels(foundDraft.labels);
-    setPairs(foundDraft.pairs);
+    setPairs(normalizeCalibrationPoints(foundDraft.pairs, legacyReference));
     setDraftSavedAt(foundDraft.savedAt);
     setLastImportedAt(foundDraft.lastImportedAt ?? null);
     setStep(foundDraft.step === "done" ? "review" : (foundDraft.step as Step));
@@ -397,8 +409,11 @@ export function MasterplanImportTool({
 
   function handleCalibrateMapClick(lat: number, lng: number) {
     if (!pendingPlanPoint) return;
-    const world = toLocalMeters({ lat, lng }, reference);
-    setPairs((prev) => [...prev, { plan: pendingPlanPoint, world }]);
+    // Stored as the coordinate itself, not as metres from the resort's
+    // reference point: that point doubles as the entrance, and moving it
+    // used to drag every calibrated plan along with it. See
+    // lib/geo/plan-calibration.ts.
+    setPairs((prev) => [...prev, { plan: pendingPlanPoint, world: { lat, lng } }]);
     setPendingPlanPoint(null);
   }
 
@@ -409,7 +424,11 @@ export function MasterplanImportTool({
   function computePreview() {
     setCalibrationError(null);
     try {
-      const fit = fitPlanToWorldTransform(pairs);
+      // The fit needs a metre frame; which origin it uses cancels out,
+      // because the same one converts the answers back.
+      const origin = calibrationOrigin(pairs);
+      if (!origin) throw new Error("Add at least two reference points first.");
+      const fit = fitPlanToWorldTransform(toPointPairs(pairs, origin));
       setFitStats({
         rms: fit.rmsErrorMeters,
         max: fit.maxErrorMeters,
@@ -419,7 +438,7 @@ export function MasterplanImportTool({
 
       const sites: ComputedSite[] = labels.map((label) => {
         const worldXY = fit.transform.apply({ x: label.x, y: label.y });
-        const latLng = fromLocalMeters(worldXY, reference);
+        const latLng = fromLocalMeters(worldXY, origin);
         return {
           id: label.id,
           siteNumber: label.text,

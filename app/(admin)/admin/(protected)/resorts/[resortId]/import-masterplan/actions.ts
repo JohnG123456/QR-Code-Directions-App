@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { calibrationPointSchema } from "@/lib/masterplan/draft-payload";
 import {
   fetchRemoteDraft,
   fetchRemoteDraftSummary,
@@ -28,12 +29,7 @@ const saveDraftSchema = z.object({
       y: z.number(),
     })
   ),
-  pairs: z.array(
-    z.object({
-      plan: z.object({ x: z.number(), y: z.number() }),
-      world: z.object({ x: z.number(), y: z.number() }),
-    })
-  ),
+  pairs: z.array(calibrationPointSchema),
   lastImportedAt: z.number().nullable(),
 });
 

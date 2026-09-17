@@ -12,6 +12,7 @@
 // numbers and calibration points - is small, and is what autosave sends.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { StoredCalibrationPoint } from "@/lib/geo/plan-calibration";
 
 export interface RemoteDraft {
   resortId: string;
@@ -23,7 +24,7 @@ export interface RemoteDraft {
   imageWidth: number;
   imageHeight: number;
   labels: { id: string; text: string; x: number; y: number }[];
-  pairs: { plan: { x: number; y: number }; world: { x: number; y: number } }[];
+  pairs: StoredCalibrationPoint[];
 }
 
 interface DraftRow {

@@ -16,7 +16,13 @@
 // the fourth is implied, and three points are exactly what an affine
 // CSS/canvas transform needs.
 
-import { fitPlanToWorldTransform, type PointPair } from "./similarity-transform";
+import { fitPlanToWorldTransform } from "./similarity-transform";
+import {
+  calibrationOrigin,
+  normalizeCalibrationPoints,
+  toPointPairs,
+  type StoredCalibrationPoint,
+} from "./plan-calibration";
 import { fromLocalMeters } from "./local-projection";
 import type { LatLng } from "./distance";
 
@@ -30,25 +36,35 @@ export interface PlanGeoreference {
   metresPerPixel: number;
 }
 
+// `legacyReference` is only consulted for calibration points still
+// stored the old way, as metres from the resort's reference point (see
+// lib/geo/plan-calibration.ts). Points stored as real coordinates ignore
+// it entirely, which is the whole point: where the sheet lands no longer
+// depends on anything that can be edited elsewhere.
 export function georeferencePlan(
-  pairs: PointPair[],
+  points: StoredCalibrationPoint[],
   imageWidth: number,
   imageHeight: number,
-  reference: LatLng
+  legacyReference: LatLng | null
 ): PlanGeoreference | null {
+  const calibration = normalizeCalibrationPoints(points, legacyReference);
+
   // Two points is the minimum the fit needs; fewer means the plan was
   // never calibrated and there's nothing to place it by.
-  if (pairs.length < 2 || imageWidth <= 0 || imageHeight <= 0) return null;
+  if (calibration.length < 2 || imageWidth <= 0 || imageHeight <= 0) return null;
+
+  const origin = calibrationOrigin(calibration);
+  if (!origin) return null;
 
   let fit;
   try {
-    fit = fitPlanToWorldTransform(pairs);
+    fit = fitPlanToWorldTransform(toPointPairs(calibration, origin));
   } catch {
     return null;
   }
 
   const corner = (x: number, y: number) =>
-    fromLocalMeters(fit.transform.apply({ x, y }), reference);
+    fromLocalMeters(fit.transform.apply({ x, y }), origin);
 
   return {
     topLeft: corner(0, 0),

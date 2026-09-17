@@ -8,7 +8,7 @@ import { PlanImageOverlay } from "@/components/map/plan-image-overlay";
 import { siteDivIcon } from "@/lib/map/site-icon";
 import { georeferencePlan } from "@/lib/geo/plan-georeference";
 import { loadMasterplanDraft } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/import-masterplan/actions";
-import type { PointPair } from "@/lib/geo/similarity-transform";
+import type { StoredCalibrationPoint } from "@/lib/geo/plan-calibration";
 import type { SiteStatus } from "@/lib/types";
 import type { BoundarySaveState } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/boundary/actions";
 import "leaflet/dist/leaflet.css";
@@ -85,7 +85,7 @@ export function BoundaryEditor({
   hasDrawnBoundary: boolean;
   sites: SiteMarker[];
   planCalibration: {
-    pairs: PointPair[];
+    pairs: StoredCalibrationPoint[];
     imageWidth: number;
     imageHeight: number;
     fileName: string | null;

@@ -10,7 +10,7 @@ import { BasemapTileLayer } from "@/components/map/basemap-tile-layer";
 import { PlanImageOverlay } from "@/components/map/plan-image-overlay";
 import { georeferencePlan } from "@/lib/geo/plan-georeference";
 import { loadMasterplanDraft } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/import-masterplan/actions";
-import type { PointPair } from "@/lib/geo/similarity-transform";
+import type { StoredCalibrationPoint } from "@/lib/geo/plan-calibration";
 import type { SiteStatus } from "@/lib/types";
 import type { ActionState } from "@/app/(admin)/admin/(protected)/resorts/[resortId]/sites/actions";
 import { SiteNumberInput } from "@/components/admin/site-number-input";
@@ -217,7 +217,7 @@ export function SatelliteCaptureTool({
   centerLng: number | null;
   defaultZoom: number;
   planCalibration: {
-    pairs: PointPair[];
+    pairs: StoredCalibrationPoint[];
     imageWidth: number;
     imageHeight: number;
   } | null;
