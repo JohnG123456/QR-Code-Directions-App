@@ -19,6 +19,7 @@ import {
   useLiveDirections,
   type LiveDirections,
 } from "@/lib/navigation/use-live-directions";
+import type { LiveFix } from "@/lib/navigation/use-live-position";
 
 interface RouteResult {
   distanceM: number;
@@ -61,6 +62,23 @@ const PLAN_VIEW_LABELS: Record<PlanView, string> = {
   both: "Both",
   satellite: "Satellite",
 };
+
+// The position simulator, and only where it has been switched on.
+//
+// NEXT_PUBLIC_ variables are fixed at build time, so a deployment either
+// has the panel or it cannot have it: the value cannot be changed from a
+// browser, a URL or a request header. In a build without it the constant
+// below is false, the dynamic import is never called, and the panel's
+// chunk - which is still emitted - is never requested by anything. Set
+// it on Vercel's Preview environment and nowhere else; see "Testing live
+// directions" in the README.
+const POSITION_SIM_ENABLED = process.env.NEXT_PUBLIC_POSITION_SIM === "1";
+
+const PositionSimulator = POSITION_SIM_ENABLED
+  ? dynamic(() => import("./position-simulator").then((m) => m.PositionSimulator), {
+      ssr: false,
+    })
+  : null;
 
 // react-leaflet touches `window`/`document` at import time, so the map
 // itself must be excluded from the server render.
@@ -146,11 +164,17 @@ export function RouteMap({
   // Live directions: off until the visitor asks for them, because they
   // cost a location permission and keep the screen awake, and most
   // guests scanning at the gate just want to see the map.
+  //
+  // With the simulator switched on, the fake fix is handed over in place
+  // of the receiver's - which also stops the page ever asking for a
+  // location permission it is not going to use.
+  const [simFix, setSimFix] = useState<LiveFix | null>(null);
   const live = useLiveDirections(
     selectedId,
     selectedSite && selectedSite.lat !== null && selectedSite.lng !== null
       ? { lat: selectedSite.lat, lng: selectedSite.lng }
-      : null
+      : null,
+    POSITION_SIM_ENABLED ? { fix: simFix } : null
   );
 
   // Ask for a route along the actual roads. Until it comes back - and if
@@ -398,6 +422,23 @@ export function RouteMap({
               followLive={live.active}
             />
           </div>
+
+          {/* Walks along the route from the entrance rather than the
+              live one: the live route is being recomputed underneath,
+              and a test rig that moves its subject because its subject
+              moved proves nothing. */}
+          {PositionSimulator && (
+            <PositionSimulator
+              routePoints={
+                route?.points ?? [
+                  [resort.entrance_lat!, resort.entrance_lng!],
+                  [selectedSite.lat!, selectedSite.lng!],
+                ]
+              }
+              onFix={setSimFix}
+              running={live.active}
+            />
+          )}
 
           {/* Over the map and the line above it, under the search
               results, which stay usable throughout. */}

@@ -68,6 +68,40 @@ hasn't been migrated still gives directions from the entrance.
   nearest road, but the dot is drawn at the raw fix. Snapping it would
   look tidier and would sometimes be a lie.
 
+### Testing it without going to a resort
+
+Set `NEXT_PUBLIC_POSITION_SIM=1` on Vercel's **Preview** environment
+(Project → Settings → Environment Variables, ticking Preview only) and
+redeploy. The visitor page then carries a "Simulated position" panel: it
+walks a pretend visitor along the route from the entrance and feeds the
+result in as if it came from the receiver, so every threshold, the
+recompute decisions and the server call all run exactly as they do for a
+real fix.
+
+Never set it on Production. It is fixed at build time — it cannot be
+turned on from a URL or a request header — so a production build simply
+has no panel to show, but a build that carries the variable shows it to
+anyone who opens that deployment.
+
+What the controls are for:
+
+- **Drive / Back to start, and the slider** — move along the route.
+  Fixes arrive once a second whether or not the car is moving, as a real
+  receiver's do.
+- **Accuracy m** — over 100 is the coarse gate (the dot shows, nothing
+  routes, and the "rough position" notice appears — this is the Android
+  battery-saving case); 25–100 gives the "accuracy is poor" note; under
+  25 is a clean fix.
+- **Sideways m** — shifts the visitor off the line. Past 30 m for three
+  consecutive ticks triggers a reroute.
+- Stop the car and the heading arrow disappears, because course over
+  ground is only trusted above 1.5 m/s.
+
+What it cannot tell you: whether the real thresholds suit your roads.
+That still needs a phone at Helena Valley — the simulator produces
+clean, well-behaved fixes, and the whole reason those thresholds exist is
+that real ones under carports and mature trees are neither.
+
 **Worth knowing before it goes in front of guests:** this is a screen
 used in a moving car, on resort roads that residents walk on. The page
 asks visitors to start it before setting off and not to read it at the

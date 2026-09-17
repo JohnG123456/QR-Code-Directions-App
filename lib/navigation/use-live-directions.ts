@@ -48,11 +48,34 @@ export interface LiveDirections {
   stop: () => void;
 }
 
+/**
+ * A stand-in for the receiver, used by the test rig.
+ *
+ * Passing this at all puts the hook in simulation: the real watch is
+ * never started, so no permission is asked for and nothing about the
+ * browser's own position reaches the page. Everything downstream - the
+ * recompute loop, the thresholds, the server call - runs exactly as it
+ * does for a real fix, which is the point of testing this way.
+ */
+export interface PositionSimulation {
+  fix: LiveFix | null;
+}
+
 export function useLiveDirections(
   siteId: string | null,
-  site: LatLng | null
+  site: LatLng | null,
+  simulation?: PositionSimulation | null
 ): LiveDirections {
-  const { status, fix, message, start: startWatch, stop: stopWatch } = useLivePosition();
+  const {
+    status: watchStatus,
+    fix: watchFix,
+    message,
+    start: startWatch,
+    stop: stopWatch,
+  } = useLivePosition();
+
+  const simulating = simulation != null;
+  const fix = simulating ? simulation.fix : watchFix;
   const [requested, setRequested] = useState(false);
   const [route, setRoute] = useState<LiveRoute | null>(null);
   const [unplaced, setUnplaced] = useState(false);
@@ -65,6 +88,14 @@ export function useLiveDirections(
   // storing a fact like that means an effect to keep it in step, a
   // render to apply it, and a window in between where the page is
   // showing the answer to the previous fix.
+
+  // A simulated run has no receiver to refuse it, so it is running as
+  // soon as it is asked for.
+  const status: LivePositionStatus = simulating
+    ? requested
+      ? "active"
+      : "idle"
+    : watchStatus;
 
   // A refusal ends the trip: there is nothing to follow, so the page
   // drops back to the route from the entrance rather than leaving a
@@ -113,13 +144,13 @@ export function useLiveDirections(
   // longer going are worse than none.
   const stop = useCallback(() => {
     setRequested(false);
-    stopWatch();
+    if (!simulating) stopWatch();
     setRoute(null);
     setUnplaced(false);
     routedFrom.current = null;
     routedAt.current = null;
     offRouteFixes.current = 0;
-  }, [stopWatch]);
+  }, [stopWatch, simulating]);
 
   const start = useCallback(() => {
     setUnplaced(false);
@@ -127,8 +158,8 @@ export function useLiveDirections(
     routedAt.current = null;
     offRouteFixes.current = 0;
     setRequested(true);
-    startWatch();
-  }, [startWatch]);
+    if (!simulating) startWatch();
+  }, [startWatch, simulating]);
 
   useEffect(() => {
     if (!active || !fix || !siteId || !site) return;
