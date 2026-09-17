@@ -26,27 +26,12 @@ interface RouteResult {
   points: [number, number][];
 }
 
-// How much of the plan drawing is shown, per view.
-//
-// The plan at full strength is the default. It is the drawing that
-// carries the site numbers and the street names, and it is what the
-// resort's own signage and paperwork look like - so it is what a guest
-// is most likely to recognise. The imagery underneath is still one tap
-// away for anyone who wants to see what the place actually looks like.
-const PLAN_VIEWS = {
-  plan: 1,
-  both: 0.75,
-  satellite: 0,
-} as const;
-
-type PlanView = keyof typeof PLAN_VIEWS;
-
 // How long the page will hold the finished map back while it waits for
 // the plan drawing and the walking route.
 //
 // Showing the map the moment it can be shown meant a guest watched it
-// assemble itself: satellite imagery, then a straight line to the site,
-// then the drawing on top, then the line snapping onto the roads. Every
+// assemble itself: the basemap, then a straight line to the site, then
+// the drawing on top, then the line snapping onto the roads. Every
 // one of those is the page working correctly, and all of them together
 // read as something broken. So the pieces are gathered behind a plain
 // screen and arrive at once.
@@ -56,12 +41,6 @@ type PlanView = keyof typeof PLAN_VIEWS;
 // as it used to and finishes assembling in the open - the same behaviour
 // as before, just rarer.
 const REVEAL_TIMEOUT_MS = 6000;
-
-const PLAN_VIEW_LABELS: Record<PlanView, string> = {
-  plan: "Site plan",
-  both: "Both",
-  satellite: "Satellite",
-};
 
 // The position simulator, and only where it has been switched on.
 //
@@ -109,9 +88,11 @@ export function RouteMap({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [routeState, setRouteState] = useState<"idle" | "loading" | "done">("idle");
-  const [planView, setPlanView] = useState<PlanView>("plan");
   // A resort with no published plan has nothing to wait for.
   const [planImageReady, setPlanImageReady] = useState(planImageUrl === null);
+  // Told apart from "ready", because a drawing that failed to load is the
+  // one case where a guest still needs imagery under the route.
+  const [planImageFailed, setPlanImageFailed] = useState(false);
   const [revealTimedOut, setRevealTimedOut] = useState(false);
 
   // Fetched on arrival rather than when a site is picked, so it is
@@ -122,10 +103,13 @@ export function RouteMap({
     if (!planImageUrl) return;
     const image = new window.Image();
     // Loaded or failed, the wait is over either way: a drawing that
-    // won't load is a reason to show the satellite view, not a reason to
+    // won't load is a reason to fall back to imagery, not a reason to
     // hold a guest at a blank screen.
     image.onload = () => setPlanImageReady(true);
-    image.onerror = () => setPlanImageReady(true);
+    image.onerror = () => {
+      setPlanImageReady(true);
+      setPlanImageFailed(true);
+    };
     image.src = planImageUrl;
   }, [planImageUrl]);
 
@@ -369,22 +353,6 @@ export function RouteMap({
           )}
 
           <div className="flex shrink-0 flex-wrap items-center gap-1.5 px-4 py-2">
-            {plan &&
-              (Object.keys(PLAN_VIEWS) as PlanView[]).map((view) => (
-                <button
-                  key={view}
-                  type="button"
-                  onClick={() => setPlanView(view)}
-                  aria-pressed={planView === view}
-                  className={
-                    planView === view
-                      ? "rounded-full bg-[#702890] px-3.5 py-1.5 text-sm font-medium text-white"
-                      : "rounded-full border border-neutral-300 px-3.5 py-1.5 text-sm text-neutral-700"
-                  }
-                >
-                  {PLAN_VIEW_LABELS[view]}
-                </button>
-              ))}
             <button
               type="button"
               onClick={reset}
@@ -408,7 +376,12 @@ export function RouteMap({
               siteLabel={`Site ${selectedSite.site_number}`}
               plan={plan}
               planImageUrl={planImageUrl}
-              planOpacity={PLAN_VIEWS[planView]}
+              // Imagery only where the drawing can't do the job: a
+              // resort whose plan hasn't been published, or one whose
+              // plan failed to load. Otherwise no tiles are fetched at
+              // all - they were being downloaded and then covered over
+              // by an opaque drawing nobody could see past.
+              showBasemap={plan === null || planImageUrl === null || planImageFailed}
               bearingDeg={bearingDeg}
               boundary={boundary}
               livePosition={live.active ? live.fix?.position ?? null : null}

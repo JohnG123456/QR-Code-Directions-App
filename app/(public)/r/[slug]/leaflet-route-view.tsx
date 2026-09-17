@@ -75,7 +75,7 @@ export function LeafletRouteView({
   siteLabel,
   plan,
   planImageUrl,
-  planOpacity,
+  showBasemap,
   bearingDeg,
   boundary,
   livePosition,
@@ -90,13 +90,22 @@ export function LeafletRouteView({
   /** The walk along the resort's own roads, when there is one. Null
    *  falls back to the dashed straight line. */
   routePoints: [number, number][] | null;
-  /** Where the published master plan sits in the world, when there is
-   *  one. Null means satellite imagery alone. */
+  /** Where the published master plan sits in the world. */
   plan: PlanOverlayPlacement | null;
   planImageUrl: string | null;
-  /** 0 hides the plan without unmounting it, so toggling back doesn't
-   *  re-download the image. */
-  planOpacity: number;
+  /** Whether to draw aerial imagery under the route.
+   *
+   *  Normally false. The master plan is the map a guest is shown: it is
+   *  the drawing that carries the site numbers and the street names, it
+   *  is what the resort's signage and paperwork look like, and it does
+   *  not show a half-built estate the way imagery of a resort still
+   *  under construction does. It is also drawn fully opaque, so the
+   *  tiles underneath were being fetched and then covered over.
+   *
+   *  True only where there is no drawing to show, or where the one there
+   *  is failed to load - a guest at a gate needs something under the
+   *  route either way. */
+  showBasemap: boolean;
   /** Compass bearing drawn straight up the page. */
   bearingDeg: number;
   /** The resort's outline; everything outside it is greyed out. */
@@ -136,6 +145,12 @@ export function LeafletRouteView({
       center={sitePos}
       zoom={zoom}
       className="h-full w-full"
+      // Set inline rather than by class so it beats Leaflet's own
+      // .leaflet-container background, which is a grey meant to be seen
+      // only for a moment while tiles load. With no tiles it is the
+      // whole margin around the drawing, so it should look like paper
+      // rather than like a map that failed.
+      style={{ background: "#f5f5f4" }}
       dragging={!rotated}
       touchZoom={rotated ? "center" : true}
       scrollWheelZoom={rotated ? "center" : true}
@@ -144,7 +159,7 @@ export function LeafletRouteView({
       attributionControl={false}
     >
       <ExposeMap onMap={setMap} />
-      <BasemapTileLayer withControl={false} />
+      {showBasemap && <BasemapTileLayer withControl={false} />}
       {plan && planImageUrl && (
         <PlanImageOverlay
           imageUrl={planImageUrl}
@@ -153,7 +168,7 @@ export function LeafletRouteView({
           topLeft={plan.topLeft}
           topRight={plan.topRight}
           bottomLeft={plan.bottomLeft}
-          opacity={planOpacity}
+          opacity={1}
         />
       )}
       <OutsideMask rings={boundary} />

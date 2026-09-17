@@ -23,7 +23,8 @@ deployment (Next.js on Vercel, Postgres/PostGIS on Supabase).
 - Public visitor page (`/r/{resort-slug}`) with a site-number search and a
   map showing a straight-line distance/bearing from the resort's entrance
   point to the selected site. This is intentionally approximate — see
-  "What's next" below.
+  "What's next" below. The map a guest sees is the resort's **master
+  plan**, not aerial imagery — see "Why visitors never see imagery".
 - **Live directions** ("Follow me as I go"): once a site is picked, the
   visitor can have the route recomputed from where they actually are
   rather than from the entrance, with their position drawn on the map and
@@ -67,6 +68,36 @@ hasn't been migrated still gives directions from the entrance.
 - **It doesn't snap the dot to the road.** The route is computed from the
   nearest road, but the dot is drawn at the raw fix. Snapping it would
   look tidier and would sometimes be a lie.
+
+### Why visitors never see imagery
+
+The visitor map draws the published master plan and no tiles at all.
+
+That is a presentation decision first. The plan is the drawing that
+carries the site numbers and the street names, it is what the resort's
+signage and paperwork look like, and it is therefore what a guest is
+most likely to recognise. Aerial imagery of a resort that is still being
+built shows bare sand and half-finished homes, which is not the thing to
+hand someone at the gate.
+
+It was also, already, waste. The plan is drawn fully opaque and was
+always the default view, so every visitor page load was fetching 20-40
+satellite tiles and then covering them completely. Nobody ever saw them.
+
+The useful consequence is that the visitor page now calls no external
+map service whatsoever. Tile usage, and the licensing that goes with it,
+is now confined to the admin capture tools, which genuinely need live
+deep zoom to place houses and trace roads — a handful of staff rather
+than every guest who scans a code.
+
+Imagery is still drawn in one case: a resort with no published plan, or
+one whose plan image fails to load. Neither should happen, but a guest
+standing at a gate needs something under the route if it does.
+
+**Per resort, check that the plan sheet covers the whole drivable area** —
+the entrance, every site, and the roads between them. Outside the sheet
+there is now paper-coloured background rather than imagery, so a plan
+that stops short leaves the route running into blank space.
 
 ### What it costs to run
 
