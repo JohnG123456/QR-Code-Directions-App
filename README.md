@@ -41,9 +41,13 @@ published to OpenStreetMap) is Phase 2, not built yet.
      Settings → API.
    - `SUPABASE_SERVICE_ROLE_KEY` — same page. Server-only, never expose to
      the client.
-   - `NEXT_PUBLIC_SITE_URL` — the domain QR codes will point to. Fine to
-     leave as `http://localhost:3000` for local development; update it
-     before printing any signage.
+   - `NEXT_PUBLIC_SITE_URL` — the address QR codes point at. Production
+     deliberately doesn't set it: the deployment serves
+     `directions.providencelifestyle.com.au`, and with the variable unset
+     the app reads Vercel's production domain at runtime, so a printed
+     code can't be left pointing at an address the site no longer
+     answers on. Set it locally only to aim a code somewhere other than
+     `http://localhost:3000`.
 4. Add your first staff user directly in the Supabase dashboard —
    **Authentication → Users → Add user**, set an email and password, and
    tick "Auto Confirm User" (no email needs to be sent). Then insert a
