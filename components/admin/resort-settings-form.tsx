@@ -118,6 +118,16 @@ export function ResortSettingsForm({
           </span>
         </label>
 
+        <p className="max-w-md text-sm text-neutral-700">
+          Reference point
+          <span className="mt-1 block text-xs text-neutral-500">
+            Click the map at the resort&apos;s entrance. It&apos;s where the
+            admin maps open, and what a resort measures from before any road
+            is traced. Once the road network has a junction marked as the
+            entrance, the visitor page uses that instead.
+          </span>
+        </p>
+
         <input type="hidden" name="centerLat" value={center?.lat ?? ""} />
         <input type="hidden" name="centerLng" value={center?.lng ?? ""} />
         <CenterPicker
