@@ -49,6 +49,14 @@ export const STATIONARY_M = 10;
  *  on its own. */
 export const IDLE_STOP_MS = 5 * 60 * 1000;
 
+/** How long "Rerouting…" stays up once it appears.
+ *
+ *  The request it describes usually answers in a few hundred
+ *  milliseconds, which is too quick to read - and a word that flickers
+ *  past unread is worse than no word, because the line it was explaining
+ *  changes anyway. So the notice is held long enough to be taken in. */
+export const REROUTE_NOTICE_MS = 1500;
+
 export type AccuracyGrade = "good" | "fair" | "coarse";
 
 /**

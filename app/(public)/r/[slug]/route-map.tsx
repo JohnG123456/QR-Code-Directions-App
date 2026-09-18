@@ -292,6 +292,14 @@ export function RouteMap({
               <p className="text-[15px] font-semibold text-[#15803d]">
                 You&apos;ve arrived at Site {selectedSite.site_number}.
               </p>
+            ) : live.active && live.rerouting ? (
+              // Shown instead of the distance, not beside it. The
+              // distance left is measured against the line the visitor
+              // has just left, so while this is up it is the one number
+              // on the page known to be wrong.
+              <p className="text-[15px] font-medium text-[#702890]">
+                Rerouting…
+              </p>
             ) : live.active && live.remainingM !== null ? (
               <p className="text-[15px] text-neutral-800">
                 <strong className="text-[#702890]">

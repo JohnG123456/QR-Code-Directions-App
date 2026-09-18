@@ -8,6 +8,7 @@ import {
   shouldRecomputeRoute,
   OFF_ROUTE_FIXES,
   OFF_ROUTE_M,
+  REROUTE_NOTICE_MS,
 } from "./live-route";
 import { useLivePosition, type LiveFix, type LivePositionStatus } from "./use-live-position";
 import { useWakeLock } from "./use-wake-lock";
@@ -42,6 +43,9 @@ export interface LiveDirections {
   unplaced: boolean;
   /** The fix is too vague to place on a road at all. */
   coarse: boolean;
+  /** A new route is being worked out because the visitor has left the
+   *  one they were given - a wrong turn, usually. */
+  rerouting: boolean;
   /** This deployment's database hasn't got route_from_point yet. */
   unsupportedByServer: boolean;
   start: () => void;
@@ -80,6 +84,8 @@ export function useLiveDirections(
   const [route, setRoute] = useState<LiveRoute | null>(null);
   const [unplaced, setUnplaced] = useState(false);
   const [unsupportedByServer, setUnsupportedByServer] = useState(false);
+  const [rerouting, setRerouting] = useState(false);
+  const rerouteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Derived rather than stored, all three of them.
   //
@@ -148,6 +154,11 @@ export function useLiveDirections(
     if (!simulating) stopWatch();
     setRoute(null);
     setUnplaced(false);
+    setRerouting(false);
+    if (rerouteTimer.current !== null) {
+      clearTimeout(rerouteTimer.current);
+      rerouteTimer.current = null;
+    }
     routedFrom.current = null;
     routedAt.current = null;
     offRouteFixes.current = 0;
@@ -188,8 +199,28 @@ export function useLiveDirections(
     }
 
     const from = fix.position;
+
+    // Whether this counts as rerouting is judged by where the visitor
+    // actually is, not by which rule asked for the request.
+    //
+    // The route is re-asked for routinely every forty metres of driving,
+    // and on a wrong turn that routine trigger usually fires before the
+    // off-route counter reaches three. Labelling by trigger would
+    // therefore miss most real reroutes and announce nothing. Being off
+    // the line is the thing worth saying out loud, however the request
+    // came to be made.
+    const offTheLine = projection !== null && projection.offsetM > OFF_ROUTE_M;
+
     inFlight.current = true;
     void (async () => {
+      if (offTheLine) {
+        setRerouting(true);
+        if (rerouteTimer.current !== null) clearTimeout(rerouteTimer.current);
+        rerouteTimer.current = setTimeout(() => {
+          setRerouting(false);
+          rerouteTimer.current = null;
+        }, REROUTE_NOTICE_MS);
+      }
       try {
         const response = await fetch(
           `/api/route?site=${encodeURIComponent(siteId)}` +
@@ -242,6 +273,7 @@ export function useLiveDirections(
     arrived,
     unplaced,
     coarse,
+    rerouting,
     unsupportedByServer,
     start,
     stop,
