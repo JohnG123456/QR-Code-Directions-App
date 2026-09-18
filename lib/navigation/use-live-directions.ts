@@ -7,11 +7,16 @@ import {
   projectOntoRoute,
   shouldRecomputeRoute,
   OFF_ROUTE_FIXES,
-  OFF_ROUTE_M,
+  isOffRoute,
   REROUTE_NOTICE_MS,
 } from "./live-route";
 import { useLivePosition, type LiveFix, type LivePositionStatus } from "./use-live-position";
 import { useWakeLock } from "./use-wake-lock";
+import {
+  DiagnosticsRecorder,
+  newSessionId,
+  type DiagnosticEvent,
+} from "./diagnostics";
 
 // Live directions: the position stream, the route recomputed from it,
 // and the decisions about when to do that, in one place.
@@ -48,6 +53,20 @@ export interface LiveDirections {
   rerouting: boolean;
   /** This deployment's database hasn't got route_from_point yet. */
   unsupportedByServer: boolean;
+  /** What the receiver is currently reporting, for the on-screen
+   *  readout. Present whether or not anything is being recorded. */
+  readout: {
+    offsetM: number | null;
+    accuracyM: number | null;
+    /** Whether this fix, on its own, counts as off the line - distance
+     *  and accuracy both. The count of consecutive such fixes is a ref,
+     *  which a render has no business reading; it goes to the recording,
+     *  where the analysis that wants it happens. */
+    offRoute: boolean;
+    remainingM: number | null;
+    speedMs: number | null;
+    headingDeg: number | null;
+  };
   start: () => void;
   stop: () => void;
 }
@@ -68,7 +87,10 @@ export interface PositionSimulation {
 export function useLiveDirections(
   siteId: string | null,
   site: LatLng | null,
-  simulation?: PositionSimulation | null
+  simulation?: PositionSimulation | null,
+  /** The resort being walked, so a recording can say which one it was.
+   *  Null turns recording off entirely. */
+  resortId?: string | null
 ): LiveDirections {
   const {
     status: watchStatus,
@@ -86,6 +108,10 @@ export function useLiveDirections(
   const [unsupportedByServer, setUnsupportedByServer] = useState(false);
   const [rerouting, setRerouting] = useState(false);
   const rerouteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recorder = useRef<DiagnosticsRecorder | null>(null);
+  // The last fix already written, so a render that repeats one doesn't
+  // record it twice.
+  const recordedAt = useRef<number | null>(null);
 
   // Derived rather than stored, all three of them.
   //
@@ -150,6 +176,11 @@ export function useLiveDirections(
   // the visitor stops following: directions to somewhere they are no
   // longer going are worse than none.
   const stop = useCallback(() => {
+    // Flushes what is buffered: the end of a drive is where the rows
+    // worth reading are.
+    recorder.current?.stop();
+    recorder.current = null;
+    recordedAt.current = null;
     setRequested(false);
     if (!simulating) stopWatch();
     setRoute(null);
@@ -165,24 +196,67 @@ export function useLiveDirections(
   }, [stopWatch, simulating]);
 
   const start = useCallback(() => {
+    recorder.current?.stop();
+    recorder.current =
+      resortId != null ? new DiagnosticsRecorder(newSessionId(), resortId, siteId) : null;
+    recorder.current?.start();
+    recordedAt.current = null;
     setUnplaced(false);
     routedFrom.current = null;
     routedAt.current = null;
     offRouteFixes.current = 0;
     setRequested(true);
     if (!simulating) startWatch();
-  }, [startWatch, simulating]);
+  }, [startWatch, simulating, resortId, siteId]);
 
   useEffect(() => {
     if (!active || !fix || !siteId || !site) return;
     // Nothing left to route to, and nothing worth routing from. The dot
     // and its accuracy circle still show either way, so the visitor can
     // see for themselves why nothing is moving.
-    if (arrived || coarse) return;
+    if (arrived || coarse) {
+      if (arrived && recorder.current !== null && recordedAt.current !== fix.at) {
+        recordedAt.current = fix.at;
+        recorder.current.add({
+          t: new Date(fix.at).toISOString(),
+          lat: fix.position.lat,
+          lng: fix.position.lng,
+          acc: fix.accuracyM,
+          spd: fix.speedMs,
+          hdg: fix.headingDeg,
+          off: projection?.offsetM ?? null,
+          rem: projection?.remainingM ?? null,
+          fixes: offRouteFixes.current,
+          ev: "arrived",
+        });
+        void recorder.current.flush();
+      }
+      return;
+    }
 
     if (projection) {
-      offRouteFixes.current =
-        projection.offsetM > OFF_ROUTE_M ? offRouteFixes.current + 1 : 0;
+      offRouteFixes.current = isOffRoute(projection.offsetM, fix.accuracyM)
+        ? offRouteFixes.current + 1
+        : 0;
+    }
+
+    // Written after the decision above, so the row carries the numbers
+    // that decision was actually made on rather than a later reading of
+    // them.
+    if (recorder.current !== null && recordedAt.current !== fix.at) {
+      recordedAt.current = fix.at;
+      recorder.current.add({
+        t: new Date(fix.at).toISOString(),
+        lat: fix.position.lat,
+        lng: fix.position.lng,
+        acc: fix.accuracyM,
+        spd: fix.speedMs,
+        hdg: fix.headingDeg,
+        off: projection?.offsetM ?? null,
+        rem: projection?.remainingM ?? null,
+        fixes: offRouteFixes.current,
+        ev: (unplaced ? "unplaced" : "fix") as DiagnosticEvent,
+      });
     }
 
     if (inFlight.current) return;
@@ -209,11 +283,24 @@ export function useLiveDirections(
     // therefore miss most real reroutes and announce nothing. Being off
     // the line is the thing worth saying out loud, however the request
     // came to be made.
-    const offTheLine = projection !== null && projection.offsetM > OFF_ROUTE_M;
+    const offTheLine =
+      projection !== null && isOffRoute(projection.offsetM, fix.accuracyM);
 
     inFlight.current = true;
     void (async () => {
       if (offTheLine) {
+        recorder.current?.add({
+          t: new Date(fix.at).toISOString(),
+          lat: from.lat,
+          lng: from.lng,
+          acc: fix.accuracyM,
+          spd: fix.speedMs,
+          hdg: fix.headingDeg,
+          off: projection?.offsetM ?? null,
+          rem: projection?.remainingM ?? null,
+          fixes: offRouteFixes.current,
+          ev: "reroute",
+        });
         setRerouting(true);
         if (rerouteTimer.current !== null) clearTimeout(rerouteTimer.current);
         rerouteTimer.current = setTimeout(() => {
@@ -275,6 +362,15 @@ export function useLiveDirections(
     coarse,
     rerouting,
     unsupportedByServer,
+    readout: {
+      offsetM: projection?.offsetM ?? null,
+      accuracyM: fix?.accuracyM ?? null,
+      offRoute:
+        projection !== null && isOffRoute(projection.offsetM, fix?.accuracyM ?? null),
+      remainingM,
+      speedMs: fix?.speedMs ?? null,
+      headingDeg: fix?.headingDeg ?? null,
+    },
     start,
     stop,
   };

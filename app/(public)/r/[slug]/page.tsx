@@ -16,10 +16,16 @@ import { RouteMap } from "./route-map";
 
 export default async function VisitorResortPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 }) {
   const { slug } = await params;
+  // Read here rather than from the browser's own URL, which a client
+  // component can only reach after it has already rendered once - and a
+  // panel that appears a beat late is a panel that looks like a bug.
+  const { diag } = await searchParams;
   const supabase = await createClient();
 
   const { data: resort, error } = await supabase
@@ -132,6 +138,7 @@ export default async function VisitorResortPage({
       bearingDeg={bearingDeg}
       boundary={boundary}
       liveDirectionsAvailable={liveDirections}
+      showReadout={diag === "1"}
     />
   );
 }

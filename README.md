@@ -109,6 +109,85 @@ the entrance, every site, and the roads between them. Outside the sheet
 there is now paper-coloured background rather than imagery, so a plan
 that stops short leaves the route running into blank space.
 
+### Recording what the receiver saw, for tuning
+
+The thresholds live directions turn on — twenty metres off the line,
+three fixes in a row, seventy-five metres to the nearest road — were
+picked from what consumer GPS does in general, not from what it does at
+a particular resort under a carport on a particular afternoon. Running
+`supabase/migrations/0016_route_diagnostics.sql` and setting
+`NEXT_PUBLIC_ROUTE_DIAGNOSTICS=1` records the second thing.
+
+Each fix is stored with the numbers the decision was made on: position,
+reported accuracy, distance from the route, distance remaining, speed,
+heading, how many consecutive fixes had been off the line, and the
+threshold in force at the time. Reroutes, arrivals and moments where the
+position couldn't be placed on a road are marked as their own events.
+Rows are buffered and flushed every fifteen seconds, so a drive is a few
+requests rather than one a second.
+
+Add `?diag=1` to a visitor URL to put the same figures on screen while
+driving. That only controls the display — recording does not need it,
+and a guest has no way to arrive at it by accident.
+
+**It stops by itself.** Three things have to hold for a row to be
+written, and the third does not depend on anyone remembering:
+
+1. `NEXT_PUBLIC_ROUTE_DIAGNOSTICS=1` in the build.
+2. The resort is published.
+3. `now()` is before `route_diagnostics_open_until()` — a date fixed in
+   the migration. After it, the function accepts the call and writes
+   nothing.
+
+That third one is the point. A location recording is a reasonable thing
+to run over a fortnight of internal testing and an unreasonable thing to
+leave running over a resort full of guests, and the difference between
+those two is usually nothing more than somebody forgetting. Extending it
+means editing the date in a migration, on purpose.
+
+Nothing stored identifies a person: no account, no device id, no IP, no
+user agent. The session id is random per trip, is not kept on the phone,
+does not survive a reload, and joins to nothing.
+
+**Reading it back**, in the Supabase SQL editor:
+
+```sql
+-- Every reroute, with the numbers that caused it. The first question is
+-- whether the offsets that triggered one are comfortably larger than the
+-- accuracy reported alongside them; where they are not, the threshold is
+-- firing on noise.
+select recorded_at, round(offset_m::numeric,1) as off_m,
+       round(accuracy_m::numeric,1) as acc_m, off_route_fixes, off_route_m
+  from route_diagnostics
+ where event = 'reroute'
+ order by recorded_at desc;
+
+-- What accuracy actually looks like at this resort, which is the figure
+-- every threshold here is really a bet about.
+select count(*) as fixes,
+       round(avg(accuracy_m)::numeric,1) as mean_m,
+       round((percentile_cont(0.5) within group (order by accuracy_m))::numeric,1) as median_m,
+       round((percentile_cont(0.95) within group (order by accuracy_m))::numeric,1) as p95_m,
+       round(max(accuracy_m)::numeric,1) as worst_m
+  from route_diagnostics where event <> 'reroute';
+
+-- How close to the line a drive normally runs. If the bulk of ordinary
+-- driving sits well under the threshold, there is room to tighten it.
+select round((percentile_cont(0.5) within group (order by offset_m))::numeric,1) as median_off_m,
+       round((percentile_cont(0.9) within group (order by offset_m))::numeric,1) as p90_off_m,
+       round((percentile_cont(0.99) within group (order by offset_m))::numeric,1) as p99_off_m
+  from route_diagnostics where event = 'fix';
+
+-- One drive, in order, for reading a particular journey back.
+select recorded_at, event, round(offset_m::numeric,1) as off_m,
+       round(accuracy_m::numeric,1) as acc_m, round(remaining_m::numeric) as left_m
+  from route_diagnostics where session_id = '<paste one>' order by recorded_at;
+```
+
+**When the tuning is done:** unset the environment variable, and
+`delete from route_diagnostics;`. The table can stay — the date stops it
+either way.
+
 ### What it costs to run
 
 One visitor drive is about **12 route requests** — one Vercel function

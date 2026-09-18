@@ -67,6 +67,32 @@ export const IDLE_STOP_MS = 5 * 60 * 1000;
  *  changes anyway. So the notice is held long enough to be taken in. */
 export const REROUTE_NOTICE_MS = 1500;
 
+/**
+ * Whether a fix is far enough off the line, and sure enough of itself,
+ * to count as having left it.
+ *
+ * Both conditions, because they answer different questions. The distance
+ * is geometry: how far off the line is far enough to mean a different
+ * road, given how close together these roads run. The accuracy is
+ * standing: whether this particular fix is entitled to an opinion about
+ * that at all.
+ *
+ * A fix reporting plus or minus twenty-five metres cannot establish that
+ * anyone is twenty-two metres from anything - it is consistent with
+ * being dead on the line. Counting it anyway is what turns a stretch of
+ * poor reception under the carports into a reroute nobody asked for.
+ * A fix good to six metres, twenty-two metres off, is real evidence.
+ *
+ * An unknown accuracy is treated as no objection rather than as a veto:
+ * some browsers simply don't report one, and refusing to ever reroute on
+ * those would be worse than the occasional false alarm.
+ */
+export function isOffRoute(offsetM: number, accuracyM: number | null): boolean {
+  if (offsetM <= OFF_ROUTE_M) return false;
+  if (accuracyM === null || !Number.isFinite(accuracyM)) return true;
+  return offsetM > accuracyM;
+}
+
 export type AccuracyGrade = "good" | "fair" | "coarse";
 
 /**

@@ -20,6 +20,7 @@ import {
   type LiveDirections,
 } from "@/lib/navigation/use-live-directions";
 import type { LiveFix } from "@/lib/navigation/use-live-position";
+import { DIAGNOSTICS_ENABLED } from "@/lib/navigation/diagnostics";
 
 interface RouteResult {
   distanceM: number;
@@ -74,6 +75,7 @@ export function RouteMap({
   bearingDeg,
   boundary,
   liveDirectionsAvailable,
+  showReadout,
 }: {
   resort: PublicResort;
   sites: PublicSite[];
@@ -88,6 +90,13 @@ export function RouteMap({
    *  Established on the server, so the button is never offered by a
    *  page that cannot deliver it. */
   liveDirectionsAvailable: boolean;
+  /** The figures behind the off-route decision, on screen.
+   *
+   *  Asked for by hand - /r/<slug>?diag=1 - rather than shown to
+   *  everyone. The recording underneath runs without it; this is only
+   *  whether the numbers are also displayed, and a guest has no reason
+   *  to see them and no way to arrive at them by accident. */
+  showReadout: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -163,8 +172,11 @@ export function RouteMap({
     selectedSite && selectedSite.lat !== null && selectedSite.lng !== null
       ? { lat: selectedSite.lat, lng: selectedSite.lng }
       : null,
-    POSITION_SIM_ENABLED ? { fix: simFix } : null
+    POSITION_SIM_ENABLED ? { fix: simFix } : null,
+    resort.id
   );
+
+
 
   // Ask for a route along the actual roads. Until it comes back - and if
   // it never does, because this resort's network hasn't been traced or
@@ -432,6 +444,8 @@ export function RouteMap({
             />
           )}
 
+          {showReadout && live.active && <Readout live={live} />}
+
           {/* Over the map and the line above it, under the search
               results, which stay usable throughout. */}
           {preparing && <Preparing siteNumber={selectedSite.site_number} />}
@@ -444,6 +458,39 @@ export function RouteMap({
           show directions. Please ask at reception.
         </p>
       )}
+    </div>
+  );
+}
+
+// The figures the off-route decision is made on, shown as they are.
+//
+// Deliberately unfriendly: this is for someone sitting in a car working
+// out why the page did or didn't reroute, and rounding or prettying the
+// numbers would lose the thing they are looking at. Offset and accuracy
+// are the pair that matter - a fix is only treated as off the line when
+// the first is larger than both the threshold and the second.
+function Readout({ live }: { live: LiveDirections }) {
+  const n = (value: number | null, digits = 0) =>
+    value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
+
+  return (
+    <div className="absolute inset-x-2 top-2 z-[1100] rounded-lg bg-black/80 px-3 py-2 font-mono text-[12px] leading-relaxed text-white">
+      <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+        <span className={live.readout.offRoute ? "text-amber-300" : undefined}>
+          off {n(live.readout.offsetM, 1)}m
+        </span>
+        <span>±{n(live.readout.accuracyM, 1)}m</span>
+        <span>left {n(live.readout.remainingM)}m</span>
+        <span>{n(live.readout.speedMs === null ? null : live.readout.speedMs * 3.6)}km/h</span>
+        <span>hdg {n(live.readout.headingDeg)}</span>
+      </div>
+      <div className="mt-0.5 text-white/70">
+        {live.readout.offRoute ? "OFF LINE" : "on line"}
+        {live.rerouting && " · rerouting"}
+        {live.unplaced && " · no road"}
+        {live.coarse && " · coarse fix"}
+        {DIAGNOSTICS_ENABLED ? " · recording" : " · not recording"}
+      </div>
     </div>
   );
 }
