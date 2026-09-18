@@ -72,13 +72,37 @@ summary {
     filter 90ms ease;
 }
 
+/* The press itself, and then the state it leaves behind.
+ *
+ * :active covers the finger being down. data-pressed is added by
+ * components/ui/press-feedback.tsx and held for most of a second after
+ * release, because the silence between lifting a finger and a server
+ * answering is exactly where a button that has reverted to normal invites
+ * a second press.
+ *
+ * The halo is what carries it rather than a fill, because these buttons
+ * are white, purple, amber, black and red, and no single fill reads as
+ * "pressed" on all of them. A ring drawn outside the button sits on the
+ * page, which is white everywhere in this app, so it reads the same
+ * whatever the button under it is doing. */
 button:not(:disabled):active,
 [role="button"]:active,
-summary:active {
-  /* Small enough not to reflow anything around it, large enough to be
-   * felt rather than looked for. */
+summary:active,
+button[data-pressed]:not(:disabled),
+[role="button"][data-pressed] {
   transform: scale(0.97);
-  filter: brightness(0.92);
+  filter: brightness(0.88);
+  box-shadow:
+    0 0 0 3px rgba(112, 40, 144, 0.55),
+    0 0 0 6px rgba(112, 40, 144, 0.18);
+}
+
+/* Once a button is genuinely busy, its own disabled styling and its
+ * changed label take over, and the press halo would only compete with
+ * them. */
+button:disabled[data-pressed] {
+  box-shadow: none;
+  transform: none;
 }
 
 button:disabled {
@@ -102,7 +126,9 @@ a:focus-visible {
   }
   button:not(:disabled):active,
   [role="button"]:active,
-  summary:active {
+  summary:active,
+  button[data-pressed]:not(:disabled),
+  [role="button"][data-pressed] {
     transform: none;
   }
 }
