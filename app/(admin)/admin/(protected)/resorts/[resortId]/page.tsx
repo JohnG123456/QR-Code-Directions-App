@@ -87,6 +87,7 @@ export default async function ResortDetailPage({
       <div className="flex flex-wrap gap-3">
         <Link
           href={`/admin/resorts/${resort.id}/sites`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Sites ({siteCount ?? 0}
@@ -94,36 +95,42 @@ export default async function ResortDetailPage({
         </Link>
         <Link
           href={`/admin/resorts/${resort.id}/import-masterplan`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Import from master plan
         </Link>
         <Link
           href={`/admin/resorts/${resort.id}/boundary`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Resort boundary
         </Link>
         <Link
           href={`/admin/resorts/${resort.id}/network`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Road network
         </Link>
         <Link
           href={`/admin/resorts/${resort.id}/capture-map`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Capture sites (Satellite map)
         </Link>
         <Link
           href={`/admin/resorts/${resort.id}/capture-sites`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Capture sites (GPS)
         </Link>
         <Link
           href={`/admin/resorts/${resort.id}/import-sites`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Import sites (CSV)

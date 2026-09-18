@@ -28,6 +28,8 @@ const MIN_HOLD_MS = 600;
 /** Nothing stays marked past this, whatever the page is doing. */
 const MAX_HOLD_MS = 20000;
 
+const PRESSABLE = "button, [role='button'], a[data-press]";
+
 function isBusy(button: Element): boolean {
   return button.matches(":disabled") || button.getAttribute("aria-disabled") === "true";
 }
@@ -41,7 +43,12 @@ export function PressFeedback() {
     function mark(event: Event) {
       const target = event.target;
       if (!(target instanceof Element)) return;
-      const button = target.closest("button, [role='button']");
+      // Links marked data-press count too. The top of every admin page
+      // is a row of things that look like buttons and are <Link>s, which
+      // is why the first version of this appeared to do nothing there -
+      // and they are the slowest taps in the app, because each one is a
+      // whole page.
+      const button = target.closest(PRESSABLE);
       if (!button || isBusy(button)) return;
 
       watching.get(button)?.();

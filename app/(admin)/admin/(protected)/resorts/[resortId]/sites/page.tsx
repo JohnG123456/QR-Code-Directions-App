@@ -47,24 +47,28 @@ export default async function SitesPage({
       <div className="flex gap-3">
         <Link
           href={`/admin/resorts/${resortId}/import-masterplan`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Import from master plan
         </Link>
         <Link
           href={`/admin/resorts/${resortId}/capture-map`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Capture sites (Satellite map)
         </Link>
         <Link
           href={`/admin/resorts/${resortId}/capture-sites`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Capture sites (GPS)
         </Link>
         <Link
           href={`/admin/resorts/${resortId}/import-sites`}
+          data-press
           className="rounded-md border border-neutral-300 px-3 py-2 text-sm hover:bg-neutral-50"
         >
           Import sites (CSV)
