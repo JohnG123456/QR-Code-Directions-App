@@ -22,6 +22,38 @@ import { MISSING_FUNCTION_CODES } from "./missing-function";
 // anyone having to remember this cache exists.
 let known = false;
 
+/**
+ * Whether this resort is recording what the receiver saw.
+ *
+ * Read here rather than from a public view, so the answer reaches the
+ * page without also being published to everyone who loads it. Never
+ * cached: it is a switch staff expect to take effect on the next page
+ * load, not on the next deployment.
+ */
+export async function fetchDiagnosticsEnabled(
+  supabase: SupabaseClient,
+  resortId: string
+): Promise<boolean> {
+  try {
+    const { data, error } = await supabase.rpc("route_diagnostics_enabled", {
+      p_resort_id: resortId,
+    });
+    if (error) {
+      if (!MISSING_FUNCTION_CODES.has(error.code ?? "")) {
+        console.error(
+          "[visitor] couldn't check diagnostics switch:",
+          error.message,
+          error.code
+        );
+      }
+      return false;
+    }
+    return data === true;
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchLiveDirectionsSupport(
   supabase: SupabaseClient
 ): Promise<boolean> {

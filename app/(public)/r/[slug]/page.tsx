@@ -3,7 +3,10 @@ import { fetchPublicPlanPlacement } from "@/lib/masterplan/published-overlay";
 import { fetchResortBoundary } from "@/lib/geo/resort-boundary";
 import { resolveMapBearing } from "@/lib/geo/map-bearing";
 import { fetchMapBearingOverride, fetchRoadGridDegrees } from "@/lib/resorts/public-resort";
-import { fetchLiveDirectionsSupport } from "@/lib/navigation/server-support";
+import {
+  fetchDiagnosticsEnabled,
+  fetchLiveDirectionsSupport,
+} from "@/lib/navigation/server-support";
 import { RouteMap } from "./route-map";
 
 // Anything that goes wrong here used to end up as the same bare 404.
@@ -100,13 +103,14 @@ export default async function VisitorResortPage({
   // Live directions are asked about here too, so the page knows whether
   // it can offer them before it draws the button rather than after a
   // guest has pressed it.
-  const [plan, boundary, bearingOverride, roadGridDeg, liveDirections] =
+  const [plan, boundary, bearingOverride, roadGridDeg, liveDirections, recordDiagnostics] =
     await Promise.all([
       fetchPublicPlanPlacement(supabase, resort.id),
       fetchResortBoundary(supabase, resort.id),
       fetchMapBearingOverride(supabase, resort.id),
       fetchRoadGridDegrees(supabase, resort.id),
       fetchLiveDirectionsSupport(supabase),
+      fetchDiagnosticsEnabled(supabase, resort.id),
     ]);
 
   // Which way the map is turned. Normally the way you're facing as you
@@ -139,6 +143,7 @@ export default async function VisitorResortPage({
       boundary={boundary}
       liveDirectionsAvailable={liveDirections}
       showReadout={diag === "1"}
+      recordDiagnostics={recordDiagnostics}
     />
   );
 }

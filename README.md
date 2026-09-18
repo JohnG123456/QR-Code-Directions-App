@@ -114,9 +114,11 @@ that stops short leaves the route running into blank space.
 The thresholds live directions turn on — twenty metres off the line,
 three fixes in a row, seventy-five metres to the nearest road — were
 picked from what consumer GPS does in general, not from what it does at
-a particular resort under a carport on a particular afternoon. Running
-`supabase/migrations/0016_route_diagnostics.sql` and setting
-`NEXT_PUBLIC_ROUTE_DIAGNOSTICS=1` records the second thing.
+a particular resort under a carport on a particular afternoon. Apply
+`0016_route_diagnostics.sql` and `0017_diagnostics_switch.sql`, then use
+**Record live directions** on the resort's admin page to record the
+second thing. It is per resort, off by default, and takes effect on the
+next page a visitor loads — no redeploy, no environment variable.
 
 Each fix is stored with the numbers the decision was made on: position,
 reported accuracy, distance from the route, distance remaining, speed,
@@ -133,11 +135,15 @@ and a guest has no way to arrive at it by accident.
 **It stops by itself.** Three things have to hold for a row to be
 written, and the third does not depend on anyone remembering:
 
-1. `NEXT_PUBLIC_ROUTE_DIAGNOSTICS=1` in the build.
+1. Staff have switched it on for that resort.
 2. The resort is published.
 3. `now()` is before `route_diagnostics_open_until()` — a date fixed in
    the migration. After it, the function accepts the call and writes
    nothing.
+
+All three are checked again inside the database on every write, so a
+page held open after the switch was turned off stops being recorded
+without needing to be closed.
 
 That third one is the point. A location recording is a reasonable thing
 to run over a fortnight of internal testing and an unreasonable thing to
@@ -184,9 +190,9 @@ select recorded_at, event, round(offset_m::numeric,1) as off_m,
   from route_diagnostics where session_id = '<paste one>' order by recorded_at;
 ```
 
-**When the tuning is done:** unset the environment variable, and
-`delete from route_diagnostics;`. The table can stay — the date stops it
-either way.
+**When the tuning is done:** turn the switch off and use **Delete them**
+on the same panel, which clears that resort's rows. The table can stay —
+the date stops it either way.
 
 ### What it costs to run
 

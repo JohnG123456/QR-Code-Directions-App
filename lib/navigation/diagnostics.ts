@@ -7,19 +7,17 @@ import { OFF_ROUTE_M } from "./live-route";
 // evidence instead of from guesses.
 //
 // Silent by design - there is nothing for a visitor to see or agree to,
-// which is exactly why the limits matter. It only runs where
-// NEXT_PUBLIC_ROUTE_DIAGNOSTICS is set, the database refuses the writes
-// after a fixed date regardless (see migration 0016), and nothing
-// recorded identifies a person: no account, no device, no browser, no
-// address. The session id is random per trip and joins to nothing.
+// which is exactly why the limits matter. It only runs for a resort
+// staff have switched it on for, the database checks that switch and a
+// fixed cut-off date again on every write (migrations 0016 and 0017),
+// and nothing recorded identifies a person: no account, no device, no
+// browser, no address. The session id is random per trip and joins to
+// nothing.
 //
 // Buffered rather than written per fix. Fixes arrive about once a
 // second, and a request each would be the same shape of mistake as a
 // route request each - a lot of traffic to record that somebody moved
 // three metres.
-
-export const DIAGNOSTICS_ENABLED =
-  process.env.NEXT_PUBLIC_ROUTE_DIAGNOSTICS === "1";
 
 /** How often the buffer is emptied. */
 const FLUSH_MS = 15000;
@@ -54,16 +52,20 @@ export class DiagnosticsRecorder {
   constructor(
     private readonly sessionId: string,
     private readonly resortId: string,
-    private readonly siteId: string | null
+    private readonly siteId: string | null,
+    /** Settled on the server when the page was built. The database
+     *  checks again on every write, so a page held open after the switch
+     *  was turned off stops being recorded either way. */
+    private readonly enabled: boolean
   ) {}
 
   start() {
-    if (!DIAGNOSTICS_ENABLED || this.timer !== null) return;
+    if (!this.enabled || this.timer !== null) return;
     this.timer = setInterval(() => void this.flush(), FLUSH_MS);
   }
 
   add(row: DiagnosticRow) {
-    if (!DIAGNOSTICS_ENABLED) return;
+    if (!this.enabled) return;
     this.buffer.push(row);
     if (this.buffer.length >= FLUSH_AT_ROWS) void this.flush();
   }
@@ -72,7 +74,7 @@ export class DiagnosticsRecorder {
    *  trip ends - the last one matters most, because the end of a drive
    *  is where the interesting rows are. */
   async flush() {
-    if (!DIAGNOSTICS_ENABLED || this.buffer.length === 0) return;
+    if (!this.enabled || this.buffer.length === 0) return;
 
     const rows = this.buffer;
     this.buffer = [];

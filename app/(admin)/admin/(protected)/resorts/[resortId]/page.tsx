@@ -5,6 +5,12 @@ import { productionHost, resortUrl } from "@/lib/qr/generate";
 import { ResortSettingsForm } from "@/components/admin/resort-settings-form";
 import { QrPanel } from "@/components/admin/qr-panel";
 import { PlanOverlayPanel } from "@/components/admin/plan-overlay-panel";
+import { DiagnosticsPanel } from "@/components/admin/diagnostics-panel";
+import { fetchDiagnosticsStatus } from "@/lib/navigation/diagnostics-status";
+import {
+  setRecordDiagnostics,
+  clearDiagnostics,
+} from "./diagnostics/actions";
 import { describePlanOverlay } from "@/lib/masterplan/remote-draft";
 import { fetchPublishedOverlayStatus } from "@/lib/masterplan/published-overlay";
 import { resolveMapBearing } from "@/lib/geo/map-bearing";
@@ -29,7 +35,14 @@ export default async function ResortDetailPage({
 
   if (!resort) notFound();
 
-  const [{ count: siteCount }, planDraft, publishedOverlay, { data: siteCoords }, { data: roadShapes }] =
+  const [
+    { count: siteCount },
+    planDraft,
+    publishedOverlay,
+    { data: siteCoords },
+    { data: roadShapes },
+    diagnostics,
+  ] =
     await Promise.all([
       supabase
         .from("sites")
@@ -39,6 +52,7 @@ export default async function ResortDetailPage({
       fetchPublishedOverlayStatus(supabase, resortId),
       supabase.from("sites").select("lat, lng").eq("resort_id", resortId),
       supabase.from("graph_edges_view").select("geojson").eq("resort_id", resortId),
+      fetchDiagnosticsStatus(supabase, resortId),
     ]);
 
   // What the map is turned to when the rotation is left on automatic.
@@ -121,6 +135,15 @@ export default async function ResortDetailPage({
         url={resortUrl(resort.slug)}
         slug={resort.slug}
         productionHost={productionHost()}
+      />
+
+      <DiagnosticsPanel
+        resortId={resort.id}
+        recording={diagnostics.recording === true}
+        rowCount={diagnostics.recording === null ? null : diagnostics.rowCount}
+        openUntil={diagnostics.openUntil}
+        setRecordDiagnostics={setRecordDiagnostics}
+        clearDiagnostics={clearDiagnostics}
       />
 
       <PlanOverlayPanel

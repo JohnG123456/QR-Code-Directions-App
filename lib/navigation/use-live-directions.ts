@@ -84,14 +84,22 @@ export interface PositionSimulation {
   fix: LiveFix | null;
 }
 
+export interface LiveDirectionsOptions {
+  /** A stand-in for the receiver. Present at all puts the hook in
+   *  simulation - see PositionSimulation. */
+  simulation?: PositionSimulation | null;
+  /** The resort being driven, so a recording can say which one. */
+  resortId?: string | null;
+  /** Whether that resort is recording. Settled on the server. */
+  recordDiagnostics?: boolean;
+}
+
 export function useLiveDirections(
   siteId: string | null,
   site: LatLng | null,
-  simulation?: PositionSimulation | null,
-  /** The resort being walked, so a recording can say which one it was.
-   *  Null turns recording off entirely. */
-  resortId?: string | null
+  options: LiveDirectionsOptions = {}
 ): LiveDirections {
+  const { simulation, resortId, recordDiagnostics = false } = options;
   const {
     status: watchStatus,
     fix: watchFix,
@@ -198,7 +206,9 @@ export function useLiveDirections(
   const start = useCallback(() => {
     recorder.current?.stop();
     recorder.current =
-      resortId != null ? new DiagnosticsRecorder(newSessionId(), resortId, siteId) : null;
+      resortId != null
+        ? new DiagnosticsRecorder(newSessionId(), resortId, siteId, recordDiagnostics)
+        : null;
     recorder.current?.start();
     recordedAt.current = null;
     setUnplaced(false);
@@ -207,7 +217,7 @@ export function useLiveDirections(
     offRouteFixes.current = 0;
     setRequested(true);
     if (!simulating) startWatch();
-  }, [startWatch, simulating, resortId, siteId]);
+  }, [startWatch, simulating, resortId, siteId, recordDiagnostics]);
 
   useEffect(() => {
     if (!active || !fix || !siteId || !site) return;

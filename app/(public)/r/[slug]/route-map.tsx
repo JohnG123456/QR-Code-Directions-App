@@ -20,7 +20,6 @@ import {
   type LiveDirections,
 } from "@/lib/navigation/use-live-directions";
 import type { LiveFix } from "@/lib/navigation/use-live-position";
-import { DIAGNOSTICS_ENABLED } from "@/lib/navigation/diagnostics";
 
 interface RouteResult {
   distanceM: number;
@@ -76,6 +75,7 @@ export function RouteMap({
   boundary,
   liveDirectionsAvailable,
   showReadout,
+  recordDiagnostics,
 }: {
   resort: PublicResort;
   sites: PublicSite[];
@@ -97,6 +97,10 @@ export function RouteMap({
    *  whether the numbers are also displayed, and a guest has no reason
    *  to see them and no way to arrive at them by accident. */
   showReadout: boolean;
+  /** Whether this resort is recording what the receiver saw. Staff turn
+   *  it on per resort from the admin; the database enforces it again on
+   *  every write. */
+  recordDiagnostics: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -172,8 +176,11 @@ export function RouteMap({
     selectedSite && selectedSite.lat !== null && selectedSite.lng !== null
       ? { lat: selectedSite.lat, lng: selectedSite.lng }
       : null,
-    POSITION_SIM_ENABLED ? { fix: simFix } : null,
-    resort.id
+    {
+      simulation: POSITION_SIM_ENABLED ? { fix: simFix } : null,
+      resortId: resort.id,
+      recordDiagnostics,
+    }
   );
 
 
@@ -444,7 +451,9 @@ export function RouteMap({
             />
           )}
 
-          {showReadout && live.active && <Readout live={live} />}
+          {showReadout && live.active && (
+            <Readout live={live} recording={recordDiagnostics} />
+          )}
 
           {/* Over the map and the line above it, under the search
               results, which stay usable throughout. */}
@@ -469,7 +478,13 @@ export function RouteMap({
 // numbers would lose the thing they are looking at. Offset and accuracy
 // are the pair that matter - a fix is only treated as off the line when
 // the first is larger than both the threshold and the second.
-function Readout({ live }: { live: LiveDirections }) {
+function Readout({
+  live,
+  recording,
+}: {
+  live: LiveDirections;
+  recording: boolean;
+}) {
   const n = (value: number | null, digits = 0) =>
     value === null || !Number.isFinite(value) ? "—" : value.toFixed(digits);
 
@@ -489,7 +504,7 @@ function Readout({ live }: { live: LiveDirections }) {
         {live.rerouting && " · rerouting"}
         {live.unplaced && " · no road"}
         {live.coarse && " · coarse fix"}
-        {DIAGNOSTICS_ENABLED ? " · recording" : " · not recording"}
+        {recording ? " · recording" : " · not recording"}
       </div>
     </div>
   );
