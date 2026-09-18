@@ -461,7 +461,14 @@ function LiveNotice({ live }: { live: LiveDirections }) {
       return "Your phone is only giving a rough position, so we can't tell which road you're on. Turn on precise location (Android: Settings → Location → Google Location Accuracy) or follow the route from the entrance.";
     }
     if (live.unplaced) {
-      return "We can't place you on a road at this resort just now, so this is the route from the entrance.";
+      // Which line is actually on screen decides what to call it. Losing
+      // the road mid-drive keeps the last route that was worked out -
+      // it is still roughly where they are going - and telling someone
+      // they are looking at the route from the entrance when they are
+      // not is how a page stops being believed.
+      return live.route === null
+        ? "We can't place you on a road at this resort just now, so this is the route from the entrance."
+        : "We've lost which road you're on, so this is the last route we worked out. It'll pick you up again once you're back on a road.";
     }
     if (live.fix?.grade === "fair") {
       return "GPS accuracy is poor here — the blue dot may be a house or two out.";
