@@ -194,6 +194,39 @@ select recorded_at, event, round(offset_m::numeric,1) as off_m,
 on the same panel, which clears that resort's rows. The table can stay —
 the date stops it either way.
 
+### What runs on every visitor request, and what doesn't
+
+The visitor path is the only part of this app that scales with anything:
+one page load, one plan image and a route lookup per site searched,
+times every guest who scans a code. Three things keep that from turning
+into traffic nobody intended.
+
+**The plan image is cached hard and addressed by version.** It is served
+from `/api/r/<slug>/plan?v=<published_at>` with a one-year `immutable`
+cache, so a phone fetches it once and a republished plan is simply a
+different URL. It is the only large response the app produces — around
+half a megabyte — so it is the one worth getting right.
+
+**Session handling does not run on public paths.** `proxy.ts` excludes
+`/r/`, `/api/r/` and `/api/route`. Its jobs are refreshing a staff
+session and keeping strangers out of `/admin`, neither of which applies
+to a guest at a gate — and a response that has been through session
+handling can carry `Set-Cookie`, which stops Vercel's edge caching it.
+Leaving it switched on across the public surface costs an invocation per
+request and can quietly defeat the caching above.
+
+**Route lookups are throttled rather than made per fix.** See the costs
+section below.
+
+**Worth knowing, and not yet fixed:** the plan image is stored as a
+base64 data URL in a Postgres column, so every request the edge cache
+does not absorb reads roughly 680 KB out of the database. Cached, that
+is a handful of reads; uncached, it is 680 KB per visitor. Supabase
+Storage is where a file like this belongs, and moving it would make the
+question moot rather than merely well-managed. To check which is
+happening, load a visitor page and look for `x-vercel-cache: HIT` on the
+plan request in the network tab.
+
 ### What it costs to run
 
 One visitor drive is about **12 route requests** — one Vercel function
