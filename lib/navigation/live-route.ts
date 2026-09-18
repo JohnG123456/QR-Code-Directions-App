@@ -20,10 +20,20 @@ export const UNUSABLE_ACCURACY_M = 100;
 /** Past this, the fix is worth showing but worth apologising for. */
 export const FAIR_ACCURACY_M = 25;
 
-/** How far off the line counts as having left it. Wider than a road,
- *  because being told you are off-route while driving down the right one
- *  is worse than being told nothing. */
-export const OFF_ROUTE_M = 30;
+/** How far off the line counts as having left it.
+ *
+ *  Still wider than a road - being told you are off-route while driving
+ *  down the right one is worse than being told nothing - but not by as
+ *  much as it was. At thirty metres a wrong turn on streets this tight
+ *  ran for longer than it needed to before anything was said.
+ *
+ *  What keeps this honest at twenty is the three-fix rule below, not the
+ *  distance: a single fix can be fifteen metres out on a good day. Where
+ *  accuracy is poor for a sustained stretch - under the carports, under
+ *  the mature trees along the boulevard - three consecutive fixes can
+ *  agree and still be wrong, so this is the number to revisit first if
+ *  real driving produces reroutes nobody asked for. */
+export const OFF_ROUTE_M = 20;
 
 /** How many fixes in a row have to agree before that is acted on. */
 export const OFF_ROUTE_FIXES = 3;

@@ -171,8 +171,13 @@ What the controls are for:
   routes, and the "rough position" notice appears — this is the Android
   battery-saving case); 25–100 gives the "accuracy is poor" note; under
   25 is a clean fix.
-- **Sideways m** — shifts the visitor off the line. Past 30 m for three
-  consecutive ticks triggers a reroute.
+- **Sideways m** — shifts the visitor off the line. Past 20 m for three
+  consecutive ticks triggers a reroute. Note what this does and does not
+  prove: it exercises the threshold, the debounce and the "Rerouting…"
+  notice, but it moves the visitor sideways through back gardens rather
+  than along the wrong road, so it says nothing about whether the route
+  computed from a road they could really be on is a sensible one. That
+  needs a car.
 - Stop the car and the heading arrow disappears, because course over
   ground is only trusted above 1.5 m/s.
 
