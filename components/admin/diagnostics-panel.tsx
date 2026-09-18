@@ -37,21 +37,28 @@ export function DiagnosticsPanel({
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirmingClear, setConfirmingClear] = useState(false);
+  // Which action is running, so each button can say what it is doing
+  // rather than all of them going quiet together.
+  const [busy, setBusy] = useState<"toggle" | "clear" | null>(null);
 
   function toggle() {
     setError(null);
+    setBusy("toggle");
     startTransition(async () => {
       const result = await setRecordDiagnostics({ resortId, on: !recording });
       if (!result.ok) setError(result.error ?? "Couldn't change that.");
+      setBusy(null);
     });
   }
 
   function clear() {
     setError(null);
+    setBusy("clear");
     startTransition(async () => {
       const result = await clearDiagnostics({ resortId });
       if (!result.ok) setError(result.error ?? "Couldn't clear that.");
       setConfirmingClear(false);
+      setBusy(null);
     });
   }
 
@@ -79,7 +86,13 @@ export function DiagnosticsPanel({
               : "rounded-lg border border-neutral-300 px-4 py-2 text-sm text-neutral-800 disabled:opacity-60"
           }
         >
-          {recording ? "Recording — tap to stop" : "Start recording"}
+          {busy === "toggle"
+            ? recording
+              ? "Stopping…"
+              : "Starting…"
+            : recording
+              ? "Recording — tap to stop"
+              : "Start recording"}
         </button>
 
         <span className="text-sm text-neutral-600">
@@ -107,7 +120,7 @@ export function DiagnosticsPanel({
               disabled={isPending}
               className="rounded border border-red-600 px-2 py-1 text-red-700 disabled:opacity-60"
             >
-              Delete
+              {busy === "clear" ? "Deleting…" : "Delete"}
             </button>
             <button
               type="button"

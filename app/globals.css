@@ -35,3 +35,74 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Buttons that acknowledge being pressed.
+ *
+ * Nothing here changed what any button does - it changes whether you can
+ * tell you hit it. Most of this app is used on a phone, outdoors, often
+ * one-handed while standing next to the thing being edited, and a tap
+ * that produces no change until a server answers reads as a tap that
+ * missed. The usual result is a second tap.
+ *
+ * Done once here rather than on each of the seventy-odd buttons, so it
+ * is consistent and so a button added later gets it without anyone
+ * remembering to.
+ *
+ * cursor: pointer is load-bearing on iOS, not decoration: Safari only
+ * applies :active to an element it considers clickable, and a plain
+ * <button> without it can be pressed with no state change at all.
+ *
+ * The tap highlight is switched off because we draw our own, which is
+ * immediate and consistent, rather than leaving iOS to flash a grey box
+ * over a purple button.
+ */
+button,
+[role="button"],
+summary {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:not(:disabled),
+[role="button"],
+summary {
+  cursor: pointer;
+  transition:
+    transform 90ms ease,
+    filter 90ms ease;
+}
+
+button:not(:disabled):active,
+[role="button"]:active,
+summary:active {
+  /* Small enough not to reflow anything around it, large enough to be
+   * felt rather than looked for. */
+  transform: scale(0.97);
+  filter: brightness(0.92);
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+/* A visible focus ring for anyone driving this from a keyboard, which
+ * the tap feedback above does nothing for. */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible {
+  outline: 2px solid #702890;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"],
+  summary {
+    transition: none;
+  }
+  button:not(:disabled):active,
+  [role="button"]:active,
+  summary:active {
+    transform: none;
+  }
+}
