@@ -93,16 +93,28 @@ button[data-pressed]:not(:disabled),
   transform: scale(0.97);
   filter: brightness(0.88);
   box-shadow:
-    0 0 0 3px rgba(112, 40, 144, 0.55),
-    0 0 0 6px rgba(112, 40, 144, 0.18);
+    0 0 0 4px rgba(112, 40, 144, 0.95),
+    0 0 0 8px rgba(112, 40, 144, 0.35);
 }
 
-/* Once a button is genuinely busy, its own disabled styling and its
- * changed label take over, and the press halo would only compete with
- * them. */
+/* A disabled button keeps the halo rather than losing it, because
+ * "disabled" here means "this is what you just pressed and it is still
+ * going" - which is the moment the halo is most needed. It only drops
+ * the press-down scale, so it does not sit there looking squashed for
+ * however long the server takes. */
 button:disabled[data-pressed] {
-  box-shadow: none;
   transform: none;
+  filter: none;
+  box-shadow:
+    0 0 0 4px rgba(112, 40, 144, 0.95),
+    0 0 0 8px rgba(112, 40, 144, 0.35);
+  /* Full strength, overriding the disabled:opacity-* these buttons carry.
+   * Opacity applies to the halo as well as the button, so leaving it
+   * would fade the ring at exactly the moment it is doing its job. The
+   * dimming is no loss: the halo and the changed label already say this
+   * one is busy, and a faded button wearing a bright ring says two
+   * contradictory things at once. */
+  opacity: 1;
 }
 
 button:disabled {
