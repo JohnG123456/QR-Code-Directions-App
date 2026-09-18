@@ -241,12 +241,20 @@ function nodeIcon(
   isSelected: boolean,
   isChainHead: boolean,
   isSnapTarget: boolean,
-  isUnreachable: boolean
+  isUnreachable: boolean,
+  isUnsaved: boolean
 ) {
-  const key = `${isEntrance}|${isSelected}|${isChainHead}|${isSnapTarget}|${isUnreachable}`;
+  const key = `${isEntrance}|${isSelected}|${isChainHead}|${isSnapTarget}|${isUnreachable}|${isUnsaved}`;
   const cached = nodeIconCache.get(key);
   if (cached) return cached;
-  const icon = buildNodeIcon(isEntrance, isSelected, isChainHead, isSnapTarget, isUnreachable);
+  const icon = buildNodeIcon(
+    isEntrance,
+    isSelected,
+    isChainHead,
+    isSnapTarget,
+    isUnreachable,
+    isUnsaved
+  );
   nodeIconCache.set(key, icon);
   return icon;
 }
@@ -256,9 +264,10 @@ function buildNodeIcon(
   isSelected: boolean,
   isChainHead: boolean,
   isSnapTarget: boolean,
-  isUnreachable: boolean
+  isUnreachable: boolean,
+  isUnsaved: boolean
 ) {
-  const dot = isEntrance || isSelected || isChainHead || isUnreachable ? 16 : 11;
+  const dot = isEntrance || isSelected || isChainHead || isUnreachable || isUnsaved ? 16 : 11;
   const color = isUnreachable
     ? "#dc2626"
     : isEntrance
@@ -269,7 +278,7 @@ function buildNodeIcon(
   // The box is bigger than the dot: the transparent margin is what your
   // finger actually hits, and it's what makes a junction selectable
   // without drawing a target the size of a house on the map.
-  const box = dot + NODE_HIT_PADDING * 2 + (isUnreachable ? 12 : 0);
+  const box = dot + NODE_HIT_PADDING * 2 + (isUnreachable || isUnsaved ? 12 : 0);
   // A ring, drawn only while this is what the next click will join onto,
   // so snapping is something you can see coming rather than discover
   // afterwards.
@@ -294,11 +303,25 @@ function buildNodeIcon(
       "></span>`
     : "";
 
+  // A junction that never reached the database looks exactly like one
+  // that did, which is how someone carries on tracing a road onto a
+  // junction that will not be there when the page is reloaded. Dashed
+  // amber, and only drawn once the queue has emptied - while a save is
+  // still in flight this would be true of every junction just placed and
+  // would say nothing.
+  const unsavedRing = isUnsaved
+    ? `<span style="
+        position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+        width:${dot + 20}px;height:${dot + 20}px;border-radius:9999px;
+        border:3px dashed #d97706;background:rgba(217,119,6,0.18);
+      "></span>`
+    : "";
+
   return L.divIcon({
     className: "",
     html: `<span style="
       display:block;position:relative;width:${box}px;height:${box}px;
-    ">${halo}${ring}<span style="
+    ">${halo}${unsavedRing}${ring}<span style="
       position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
       width:${dot}px;height:${dot}px;border-radius:9999px;
       background:${color};border:2px solid white;
@@ -519,6 +542,18 @@ export function NetworkEditor({
   const unreachableIds = useMemo(
     () => new Set(connectivity.unreachableIds),
     [connectivity]
+  );
+
+  // Junctions still carrying a placeholder id once every queued write has
+  // finished. While the queue is running a placeholder means "not saved
+  // yet", which is ordinary and says nothing; once it has drained, the
+  // same placeholder means the write failed and this junction is not in
+  // the database. It will still be on the map, indistinguishable from the
+  // rest, until the page is reloaded - at which point it is simply gone,
+  // along with any road drawn onto it since.
+  const unsavedIds = useMemo(
+    () => (inFlight > 0 ? new Set<string>() : new Set(nodes.filter((n) => isTempId(n.id)).map((n) => n.id))),
+    [nodes, inFlight]
   );
 
   // Which cut-off junction "Show me" goes to next. Kept as a plain
@@ -824,7 +859,9 @@ export function NetworkEditor({
     enqueue(async () => {
       const realId = resolveId(nodeId);
       if (isTempId(realId)) {
-        setError("That junction hasn't finished saving, so the move didn't stick.");
+        setError(
+          "That junction never saved, so the move didn't stick. It's ringed in amber on the map."
+        );
         return;
       }
       const result = await moveGraphNode({ resortId, nodeId: realId, lat, lng });
@@ -1188,11 +1225,23 @@ export function NetworkEditor({
           </label>
         )}
 
-        {inFlight > 0 && (
-          <span className="text-xs text-neutral-500">
-            Saving{inFlight > 1 ? ` ${inFlight} changes` : ""}…
-          </span>
-        )}
+        {/* Reserved rather than conditional, for the reason spelled out
+            below: a line that comes and goes reflows this row, and this
+            row sits directly above the map you are tapping. */}
+        <span
+          aria-live="polite"
+          className={
+            inFlight > 0
+              ? "flex items-center gap-1.5 text-xs font-medium text-[#702890]"
+              : "invisible flex items-center gap-1.5 text-xs"
+          }
+        >
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#702890] motion-reduce:animate-none"
+          />
+          Saving{inFlight > 1 ? ` ${inFlight} changes` : ""}…
+        </span>
       </div>
 
       {/* Fixed height, deliberately.
@@ -1202,6 +1251,22 @@ export function NetworkEditor({
           map slides out from under your finger between taps, so the next
           tap lands somewhere you didn't aim. Reserving the space keeps
           the map still. */}
+      {unsavedIds.size > 0 && (
+        <p
+          role="alert"
+          className="rounded-md border-2 border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          <strong>
+            {unsavedIds.size} {unsavedIds.size === 1 ? "junction" : "junctions"} didn&apos;t
+            save
+          </strong>{" "}
+          — ringed in amber on the map. They are not in the database and
+          will be gone when this page is reloaded, along with any road
+          drawn onto them since. Undo back past them and redraw, or
+          reload to see what actually saved.
+        </p>
+      )}
+
       <div className="flex min-h-[5rem] flex-col gap-1 sm:min-h-[4rem]">
         <p className="text-sm text-neutral-600">
           {mode === "draw"
@@ -1378,7 +1443,8 @@ export function NetworkEditor({
                 node.id === selectedNodeId,
                 node.id === chainNodeId,
                 snapPreview?.kind === "node" && snapPreview.nodeId === node.id,
-                unreachableIds.has(node.id)
+                unreachableIds.has(node.id),
+                unsavedIds.has(node.id)
               )}
               draggable={mode === "edit"}
               eventHandlers={{
@@ -1438,7 +1504,9 @@ export function NetworkEditor({
                 enqueue(async () => {
                   const realId = resolveId(nodeId);
                   if (isTempId(realId)) {
-                    setError("That junction hasn't finished saving yet.");
+                    setError(
+                      "That junction never saved, so it can't be the entrance. It's ringed in amber on the map."
+                    );
                     return;
                   }
                   const result = await setEntranceNode({ resortId, nodeId: realId });
