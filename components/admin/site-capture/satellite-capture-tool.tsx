@@ -242,6 +242,25 @@ export function SatelliteCaptureTool({
   const [newSiteNumber, setNewSiteNumber] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  // Every write, not just the Save button.
+  //
+  // Placing a site had a busy state; moving a pin, deleting, renaming and
+  // changing status did not - and those are most of what an afternoon in
+  // this tool actually consists of. Each of them rolls back and explains
+  // itself if it fails, so nothing was ever lost silently, but on a slow
+  // connection there was no way to tell a write that was still going from
+  // one that had already finished.
+  const [writesInFlight, setWritesInFlight] = useState(0);
+
+  /** Runs a write with the indicator on for as long as it takes. */
+  async function tracked<T>(work: () => Promise<T>): Promise<T> {
+    setWritesInFlight((n) => n + 1);
+    try {
+      return await work();
+    } finally {
+      setWritesInFlight((n) => n - 1);
+    }
+  }
   const [searchTerm, setSearchTerm] = useState("");
   const [showNumbers, setShowNumbers] = useState(true);
   // Locked by default: reviewing and zooming is most of the work, and an
@@ -374,7 +393,7 @@ export function SatelliteCaptureTool({
     formData.set("lat", String(pending.lat));
     formData.set("lng", String(pending.lng));
 
-    const result = await addSite({}, formData);
+    const result = await tracked(() => addSite({}, formData));
     setIsSaving(false);
 
     if (result.error || !result.siteId) {
@@ -420,7 +439,7 @@ export function SatelliteCaptureTool({
     formData.set("lat", String(lat));
     formData.set("lng", String(lng));
 
-    const result = await updateSiteLocation({}, formData);
+    const result = await tracked(() => updateSiteLocation({}, formData));
     if (result.error) {
       // Put the pin back where it was and say so - a pin that springs
       // back with no explanation looks like the map is broken.
@@ -451,7 +470,7 @@ export function SatelliteCaptureTool({
     formData.set("siteId", siteId);
     formData.set("resortId", resortId);
     try {
-      await deleteSite(formData);
+      await tracked(() => deleteSite(formData));
       if (removed) pushUndo({ kind: "delete", site: removed });
     } catch {
       setSites(previous);
@@ -480,7 +499,7 @@ export function SatelliteCaptureTool({
     // "clear it", so leaving it out would wipe the label on every rename.
     formData.set("label", before.label ?? "");
 
-    const result = await updateSiteDetails({}, formData);
+    const result = await tracked(() => updateSiteDetails({}, formData));
     if (result.error) {
       setActionError(result.error);
       return;
@@ -503,7 +522,7 @@ export function SatelliteCaptureTool({
     formData.set("resortId", resortId);
     formData.set("status", status);
     try {
-      await setSiteStatus(formData);
+      await tracked(() => setSiteStatus(formData));
       if (before) {
         pushUndo({
           kind: "status",
@@ -703,6 +722,23 @@ export function SatelliteCaptureTool({
                 ? `Undo ${describeUndo(undoStack[undoStack.length - 1])}`
                 : "Undo"}
           </button>
+          {/* Space held whether or not it is showing: this row sits
+              above the map, and a line that appears and disappears
+              shifts everything beside it between taps. */}
+          <span
+            aria-live="polite"
+            className={
+              writesInFlight > 0
+                ? "flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm font-medium text-[#702890]"
+                : "invisible flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm"
+            }
+          >
+            <span
+              aria-hidden="true"
+              className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-[#702890] motion-reduce:animate-none"
+            />
+            Saving{writesInFlight > 1 ? ` ${writesInFlight} changes` : ""}…
+          </span>
           <label className="flex shrink-0 items-center gap-1.5 whitespace-nowrap text-sm">
             <input
               type="checkbox"
@@ -909,7 +945,7 @@ export function SatelliteCaptureTool({
               onClick={handleSaveNewSite}
               className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
             >
-              {isSaving ? "Saving..." : "Save site"}
+              {isSaving ? "Saving…" : "Save site"}
             </button>
             <button
               type="button"
