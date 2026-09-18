@@ -58,7 +58,7 @@ body {
  */
 button,
 [role="button"],
-a[data-press],
+a[href],
 summary {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -66,7 +66,7 @@ summary {
 
 button:not(:disabled),
 [role="button"],
-a[data-press],
+a[href],
 summary {
   cursor: pointer;
   transition:
@@ -122,6 +122,21 @@ button:disabled[data-pressed] {
 
 button:disabled {
   cursor: not-allowed;
+}
+
+/* Links that are not dressed as buttons - "← All resorts", Backup,
+ * Download PNG, the QR code's own address - are marked with a wash of
+ * colour instead of a ring.
+ *
+ * A box-shadow on an inline element is drawn around each line box
+ * separately, so a link that wraps, as that address does over three
+ * lines, would come back fenced into pieces. A background survives
+ * wrapping intact, and on a text link it reads as clearly as the ring
+ * does on a button. */
+a[href]:not([data-press])[data-pressed] {
+  background-color: rgba(112, 40, 144, 0.18);
+  box-shadow: 0 0 0 2px rgba(112, 40, 144, 0.18);
+  border-radius: 3px;
 }
 
 /* A visible focus ring for anyone driving this from a keyboard, which

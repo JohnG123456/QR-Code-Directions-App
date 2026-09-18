@@ -26,6 +26,7 @@ export default async function ResortsPage() {
             <li key={resort.id}>
               <Link
                 href={`/admin/resorts/${resort.id}`}
+                data-press
                 className="flex items-center justify-between px-4 py-3 hover:bg-neutral-50"
               >
                 <span className="font-medium">{resort.name}</span>
