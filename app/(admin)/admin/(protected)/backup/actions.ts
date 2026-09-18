@@ -2,12 +2,18 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { parseBackup } from "@/lib/backup/restore";
+import { parseBackup, lineToEwkt, ringToEwkt } from "@/lib/backup/restore";
 
 export interface RestoreResult {
   resorts: number;
   sites: number;
   skippedSites: number;
+  /** Road segments restored, across every resort that had none. */
+  roadSegments: number;
+  boundaries: number;
+  plans: number;
+  /** Resorts whose roads were left alone because they already had some. */
+  networksSkipped: string[];
   errors: string[];
 }
 
@@ -15,7 +21,16 @@ export interface RestoreResult {
 // resorts by slug and sites by (resort, site number), so it merges into
 // whatever is already there and re-running it is harmless.
 export async function restoreBackup(fileText: string): Promise<RestoreResult> {
-  const empty: RestoreResult = { resorts: 0, sites: 0, skippedSites: 0, errors: [] };
+  const empty: RestoreResult = {
+    resorts: 0,
+    sites: 0,
+    skippedSites: 0,
+    roadSegments: 0,
+    boundaries: 0,
+    plans: 0,
+    networksSkipped: [],
+    errors: [],
+  };
 
   const { backup, error, skippedSites } = parseBackup(fileText);
   if (!backup) return { ...empty, errors: [error ?? "Couldn't read that file."] };
@@ -104,6 +119,11 @@ export async function restoreBackup(fileText: string): Promise<RestoreResult> {
     }
   }
 
+  // Everything above is resorts and sites, which merge. What follows is
+  // the work that can't be re-derived: the traced roads, the drawn
+  // perimeter and the plan's calibration.
+  const extra = await restoreResortExtras(supabase, backup, idBySlug, slugByBackupId, errors);
+
   revalidatePath("/admin/resorts");
   revalidatePath("/admin/backup");
 
@@ -111,8 +131,161 @@ export async function restoreBackup(fileText: string): Promise<RestoreResult> {
     resorts: backup.resorts.length,
     sites: restoredSites,
     skippedSites,
+    ...extra,
     errors,
   };
+}
+
+async function restoreResortExtras(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  backup: NonNullable<ReturnType<typeof parseBackup>["backup"]>,
+  idBySlug: Map<string, string>,
+  slugByBackupId: Map<string, string>,
+  errors: string[]
+): Promise<Pick<RestoreResult, "roadSegments" | "boundaries" | "plans" | "networksSkipped">> {
+  let roadSegments = 0;
+  let boundaries = 0;
+  let plans = 0;
+  const networksSkipped: string[] = [];
+
+  /** Where each backup id ended up. The file's ids are not reused - a
+   *  resort that already exists keeps its own - so everything that points
+   *  at a node has to be pointed at the new one instead. */
+  const nodeIdMap = new Map<string, string>();
+
+  for (const resort of backup.resorts) {
+    const slug = slugByBackupId.get(resort.id) ?? resort.slug;
+    const liveId = idBySlug.get(slug);
+    if (!liveId) continue;
+
+    const nodes = backup.graphNodes.filter((n) => n.resort_id === resort.id);
+    const edges = backup.graphEdges.filter((e) => e.resort_id === resort.id);
+
+    if (nodes.length > 0) {
+      // Merging two road networks produces a duplicated one, not a
+      // merged one, so a resort that already has roads keeps them.
+      const { count: existing } = await supabase
+        .from("graph_nodes")
+        .select("id", { count: "exact", head: true })
+        .eq("resort_id", liveId);
+
+      if ((existing ?? 0) > 0) {
+        networksSkipped.push(slug);
+      } else {
+        const { data: inserted, error: nodeError } = await supabase
+          .from("graph_nodes")
+          .insert(
+            nodes.map((node) => ({
+              resort_id: liveId,
+              geom: `SRID=4326;POINT(${node.lng} ${node.lat})`,
+              node_type: node.node_type,
+            }))
+          )
+          .select("id");
+
+        if (nodeError) {
+          errors.push(`${slug}: couldn't restore the road network (${nodeError.message}).`);
+        } else {
+          // Insert order is preserved, which is what lets the file's ids
+          // be matched to the new ones without storing either.
+          (inserted ?? []).forEach((row, i) => {
+            if (nodes[i]) nodeIdMap.set(nodes[i].id, (row as { id: string }).id);
+          });
+
+          const edgeRows = edges.flatMap((edge) => {
+            const from = nodeIdMap.get(edge.from_node_id);
+            const to = nodeIdMap.get(edge.to_node_id);
+            if (!from || !to) return [];
+            return [
+              {
+                resort_id: liveId,
+                from_node_id: from,
+                to_node_id: to,
+                geom: lineToEwkt(edge.geojson.coordinates),
+                path_type: edge.path_type,
+                is_bidirectional: edge.is_bidirectional,
+              },
+            ];
+          });
+
+          if (edgeRows.length > 0) {
+            const { error: edgeError, count } = await supabase
+              .from("graph_edges")
+              .insert(edgeRows, { count: "exact" });
+            if (edgeError) {
+              errors.push(`${slug}: roads partly restored (${edgeError.message}).`);
+            } else {
+              roadSegments += count ?? edgeRows.length;
+            }
+          }
+
+          // The entrance is a node, so it has to be re-pointed too - and
+          // without it route_to_site has nowhere to start.
+          const entrance = resort.entrance_node_id
+            ? nodeIdMap.get(resort.entrance_node_id)
+            : null;
+          if (entrance) {
+            await supabase
+              .from("resorts")
+              .update({ entrance_node_id: entrance })
+              .eq("id", liveId);
+          }
+
+          // And each home's connection to it. Without these a restored
+          // resort has its homes and its roads and no way between them.
+          const connections = backup.sites.flatMap((site) => {
+            if (site.resort_id !== resort.id || !site.graph_node_id) return [];
+            const nodeId = nodeIdMap.get(site.graph_node_id);
+            return nodeId ? [{ site_number: site.site_number, nodeId }] : [];
+          });
+          for (const connection of connections) {
+            await supabase
+              .from("sites")
+              .update({ graph_node_id: connection.nodeId })
+              .eq("resort_id", liveId)
+              .eq("site_number", connection.site_number);
+          }
+        }
+      }
+    }
+
+    const boundary = backup.boundaries.find((b) => b.resort_id === resort.id);
+    if (boundary) {
+      const { error: boundaryError } = await supabase
+        .from("resorts")
+        .update({ boundary: ringToEwkt(boundary.geojson.coordinates) })
+        .eq("id", liveId);
+      if (boundaryError) {
+        errors.push(`${slug}: couldn't restore the boundary (${boundaryError.message}).`);
+      } else {
+        boundaries += 1;
+      }
+    }
+
+    if (resort.map_bearing_deg !== null) {
+      await supabase
+        .from("resorts")
+        .update({ map_bearing_deg: resort.map_bearing_deg })
+        .eq("id", liveId);
+    }
+
+    const overlay = backup.planOverlays.find((o) => o.resort_id === resort.id);
+    if (overlay) {
+      const { error: overlayError } = await supabase
+        .from("resort_plan_overlays")
+        .upsert(
+          { ...overlay, resort_id: liveId },
+          { onConflict: "resort_id" }
+        );
+      if (overlayError) {
+        errors.push(`${slug}: couldn't restore the master plan (${overlayError.message}).`);
+      } else {
+        plans += 1;
+      }
+    }
+  }
+
+  return { roadSegments, boundaries, plans, networksSkipped };
 }
 
 interface SiteRow {

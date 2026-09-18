@@ -1,13 +1,20 @@
 // Turning everything in the database into files you can keep somewhere
 // else.
 //
-// This exists because the whole system's real value is the site
-// coordinates, and they live in a Supabase project on the free tier that
-// gets touched a few times a year. Free projects pause after a week of
-// inactivity and can eventually be removed; the coordinates took hours to
-// capture and can't be re-derived from anything but the master plans. So:
-// a one-click download that opens in Excel or Google Sheets, plus a JSON
+// This exists because the whole system's real value is work that took
+// hours and can't be re-derived, sitting in a Supabase project on the
+// free tier that gets touched a few times a year. Free projects pause
+// after a week of inactivity and can eventually be removed. So: a
+// one-click download that opens in Excel or Google Sheets, plus a JSON
 // copy complete enough to rebuild the database from scratch.
+//
+// "Everything" grew. Version 1 held resorts and sites, which was all
+// there was when it was written. Since then the expensive things have
+// been the road network - traced junction by junction, and what makes
+// routing work at all - the drawn boundary, and the master plan's
+// calibration. A backup that silently stopped covering most of what it
+// would hurt to lose is worse than no backup, because it is trusted.
+// Version 2 carries all of it.
 //
 // Pure and dependency-free so it can be unit tested.
 
@@ -20,6 +27,9 @@ export interface BackupResort {
   total_homes: number | null;
   center_lat: number | null;
   center_lng: number | null;
+  /** Which junction on the road network the walk starts from. */
+  entrance_node_id: string | null;
+  map_bearing_deg: number | null;
   created_at: string;
 }
 
@@ -32,16 +42,92 @@ export interface BackupSite {
   lat: number | null;
   lng: number | null;
   gps_accuracy_m: number | null;
+  /** Where this home joins the network. Without it a restored resort has
+   *  its homes and its roads but no way from one to the other. */
+  graph_node_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
+/** A junction, a bend, or the point where a driveway meets the road. */
+export interface BackupGraphNode {
+  id: string;
+  resort_id: string;
+  lat: number;
+  lng: number;
+  node_type: string;
+}
+
+/** A stretch of road between two nodes, with the shape it actually
+ *  follows - a straight line between the ends would cut corners the
+ *  routing then tells people to drive through. */
+export interface BackupGraphEdge {
+  id: string;
+  resort_id: string;
+  from_node_id: string;
+  to_node_id: string;
+  path_type: string;
+  is_bidirectional: boolean;
+  /** GeoJSON LineString, as graph_edges_view hands it over. */
+  geojson: unknown;
+}
+
+/** The perimeter staff traced. Only the drawn one is kept: the computed
+ *  fallback re-derives itself from the homes. */
+export interface BackupBoundary {
+  resort_id: string;
+  geojson: unknown;
+}
+
+/** The published master plan - the drawing and, more to the point, the
+ *  corners that place it in the world. The calibration is the part that
+ *  took the work. */
+export interface BackupPlanOverlay {
+  resort_id: string;
+  image_data_url: string;
+  content_type: string;
+  image_width: number;
+  image_height: number;
+  top_left_lat: number;
+  top_left_lng: number;
+  top_right_lat: number;
+  top_right_lng: number;
+  bottom_left_lat: number;
+  bottom_left_lng: number;
+  source_file_name: string | null;
+  published_at: string;
+}
+
 export interface Backup {
-  /** Bumped if the shape ever changes, so a restore can tell. */
-  version: 1;
+  /** Bumped if the shape ever changes, so a restore can tell. Version 1
+   *  files still restore - they simply carry less. */
+  version: 2;
   exportedAt: string;
   resorts: BackupResort[];
   sites: BackupSite[];
+  graphNodes: BackupGraphNode[];
+  graphEdges: BackupGraphEdge[];
+  boundaries: BackupBoundary[];
+  planOverlays: BackupPlanOverlay[];
+}
+
+/** What a backup contains, for telling someone plainly what they have
+ *  just downloaded rather than leaving them to trust it. */
+export function describeBackup(backup: Backup): string {
+  const parts = [
+    `${backup.resorts.length} ${backup.resorts.length === 1 ? "resort" : "resorts"}`,
+    `${backup.sites.length} sites`,
+  ];
+  if (backup.graphEdges.length > 0) {
+    parts.push(`${backup.graphEdges.length} road segments`);
+  }
+  if (backup.boundaries.length > 0) {
+    parts.push(`${backup.boundaries.length} traced ${backup.boundaries.length === 1 ? "boundary" : "boundaries"}`);
+  }
+  if (backup.planOverlays.length > 0) {
+    parts.push(`${backup.planOverlays.length} published ${backup.planOverlays.length === 1 ? "plan" : "plans"}`);
+  }
+  return parts.join(", ");
 }
 
 // Quote anything that could confuse a spreadsheet, and double any quotes

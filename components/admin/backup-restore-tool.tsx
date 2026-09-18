@@ -27,11 +27,24 @@ export function BackupRestoreTool({
     // Just enough of a peek to show what's about to happen - the real
     // validation runs on the server when Restore is clicked.
     try {
-      const parsed = JSON.parse(text) as { resorts?: unknown[]; sites?: unknown[] };
+      const parsed = JSON.parse(text) as {
+        resorts?: unknown[];
+        sites?: unknown[];
+        graphEdges?: unknown[];
+        boundaries?: unknown[];
+        planOverlays?: unknown[];
+      };
       setFileText(text);
-      setSummary(
-        `${parsed.resorts?.length ?? 0} resorts and ${parsed.sites?.length ?? 0} sites`
-      );
+      // Named individually rather than summed, so an older file that
+      // holds no roads says so here rather than after the restore.
+      const parts = [
+        `${parsed.resorts?.length ?? 0} resorts`,
+        `${parsed.sites?.length ?? 0} sites`,
+      ];
+      if (parsed.graphEdges?.length) parts.push(`${parsed.graphEdges.length} road segments`);
+      if (parsed.boundaries?.length) parts.push(`${parsed.boundaries.length} boundaries`);
+      if (parsed.planOverlays?.length) parts.push(`${parsed.planOverlays.length} master plans`);
+      setSummary(parts.join(", "));
     } catch {
       setFileText(null);
       setSummary(null);
@@ -91,10 +104,19 @@ export function BackupRestoreTool({
         <div className="text-sm">
           {result.sites > 0 || result.resorts > 0 ? (
             <p className="text-green-700">
-              Restored {result.resorts} resorts and {result.sites} sites.
+              Restored {result.resorts} resorts and {result.sites} sites
+              {result.roadSegments > 0 && `, ${result.roadSegments} road segments`}
+              {result.boundaries > 0 && `, ${result.boundaries} boundaries`}
+              {result.plans > 0 && `, ${result.plans} master plans`}.
             </p>
           ) : (
             <p className="text-red-700">Nothing was restored.</p>
+          )}
+          {result.networksSkipped.length > 0 && (
+            <p className="mt-1 text-amber-700">
+              These resorts already had roads traced, so the file&apos;s were
+              left out rather than laid on top: {result.networksSkipped.join(", ")}.
+            </p>
           )}
           {result.skippedSites > 0 && (
             <p className="mt-1 text-amber-700">

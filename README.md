@@ -381,6 +381,12 @@ that as a refused permission and suggests opening it in Chrome or Safari.
   compatibility gaps across mobile browsers; `@napi-rs/canvas` is listed
   in `next.config.ts`'s `serverExternalPackages` since bundling a native
   addon breaks its own runtime binary resolution.
+- `lib/backup/` — the download/restore pair. `export.ts` defines what a
+  backup holds (version 2: resorts, sites, the traced road network, drawn
+  boundaries and published master plans) and `restore.ts` reads one back,
+  accepting version 1 files too. Restoring merges rather than clobbers,
+  except the road network — two networks laid over each other are a
+  duplicated one, so a resort that already has roads keeps them.
 - `supabase/migrations/0001_init.sql` — schema, RLS, and public views.
   `graph_nodes`/`graph_edges` are created here but unused until Phase 2.
 - `supabase/migrations/0015_route_from_live_position.sql` — `route_from_point`,
