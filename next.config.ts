@@ -25,6 +25,29 @@ const nextConfig: NextConfig = {
       "node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
     ],
   },
+
+  // @napi-rs/canvas publishes one prebuilt binary per platform as optional
+  // dependencies, and npm installs every one the build machine satisfies -
+  // here both the glibc and the musl Linux builds, ~33 MB and ~29 MB. At
+  // runtime the package picks exactly one, by reading process.report's
+  // glibcVersionRuntime, and on Vercel (Amazon Linux, glibc) that is always
+  // the gnu build. The musl copy has only ever been ballast.
+  //
+  // It is not ballast in one function but two: the extract route reaches
+  // canvas through extract-labels-server, and the resort detail page
+  // reaches it through publishPlanOverlay -> downscale-plan, so every
+  // deployment has been storing the unusable binary twice.
+  //
+  // Measured on this commit by summing each route's .nft.json (the same
+  // manifest the deployment ships from): 75.6 MB of unique traced files
+  // becomes 46.7 MB. The extract route goes 71.8 -> 42.8 MB and the resort
+  // detail page 64.1 -> 35.2 MB, with pdf.worker.mjs, pdf.mjs and the gnu
+  // binary all still present.
+  //
+  // NB: these keys are globs, so "*" here means every route.
+  outputFileTracingExcludes: {
+    "*": ["node_modules/@napi-rs/canvas-linux-x64-musl/**"],
+  },
 };
 
 export default nextConfig;
