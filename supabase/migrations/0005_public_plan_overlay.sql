@@ -44,6 +44,11 @@ create table if not exists public.resort_plan_overlays (
 );
 
 alter table public.resort_plan_overlays enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.resort_plan_overlays to authenticated, service_role;
 
 -- Same model as the rest of the admin tables: any staff member can
 -- publish for any resort. Visitors never touch the base table.

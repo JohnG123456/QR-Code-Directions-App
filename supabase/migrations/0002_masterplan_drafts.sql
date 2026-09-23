@@ -40,6 +40,11 @@ create trigger trg_masterplan_drafts_updated_at before update on public.masterpl
   for each row execute function public.set_updated_at();
 
 alter table public.masterplan_drafts enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.masterplan_drafts to authenticated, service_role;
 
 -- Same model as the rest of the admin tables: any staff member can work
 -- on any resort. Nothing here is ever exposed to anon.

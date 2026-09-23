@@ -33,6 +33,11 @@ create table if not exists public.removed_site_numbers (
 );
 
 alter table public.removed_site_numbers enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.removed_site_numbers to authenticated, service_role;
 
 -- Same model as the rest of the admin tables. Never exposed to anon:
 -- this is a note about the resort's setup, not about the resort.

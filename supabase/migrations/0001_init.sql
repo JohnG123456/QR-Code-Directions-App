@@ -169,11 +169,23 @@ create trigger trg_graph_nodes_updated_at before update on public.graph_nodes
 -- ---------------------------------------------------------------------
 
 alter table public.staff_profiles enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.staff_profiles to authenticated, service_role;
 alter table public.resorts enable row level security;
+grant select, insert, update, delete on public.resorts to authenticated, service_role;
 alter table public.sites enable row level security;
+grant select, insert, update, delete on public.sites to authenticated, service_role;
 alter table public.graph_nodes enable row level security;
+grant select, insert, update, delete on public.graph_nodes to authenticated, service_role;
+grant usage, select on sequence public.graph_nodes_node_seq_seq to authenticated, service_role;
 alter table public.graph_edges enable row level security;
+grant select, insert, update, delete on public.graph_edges to authenticated, service_role;
+grant usage, select on sequence public.graph_edges_edge_seq_seq to authenticated, service_role;
 alter table public.staff_resort_access enable row level security;
+grant select, insert, update, delete on public.staff_resort_access to authenticated, service_role;
 
 create policy "staff can read own profile" on public.staff_profiles
   for select using (auth.uid() = id);

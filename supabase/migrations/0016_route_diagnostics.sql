@@ -57,6 +57,12 @@ create index if not exists route_diagnostics_created_idx
   on public.route_diagnostics (created_at);
 
 alter table public.route_diagnostics enable row level security;
+-- Data API grants. Supabase stops granting these automatically on new
+-- tables from 30 Oct 2026, so each table states its own. anon
+-- (signed out) gets no table access; anything public goes through a
+-- view or function with its own grant. RLS still decides the rows.
+grant select, insert, update, delete on public.route_diagnostics to authenticated, service_role;
+grant usage, select on sequence public.route_diagnostics_id_seq to authenticated, service_role;
 
 -- Staff read it. Nobody else reads it at all: anon can add to this table
 -- through the function below and can never see what anyone else added.
