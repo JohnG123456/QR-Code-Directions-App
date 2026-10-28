@@ -36,6 +36,15 @@ export interface LiveFix {
   grade: AccuracyGrade;
   /** GPS course over ground, only once moving fast enough to mean it. */
   headingDeg: number | null;
+  /** The same, but holding the last trustworthy value through the
+   *  moments when there isn't one.
+   *
+   *  Course is meaningless below walking pace, so headingDeg goes null
+   *  at every junction and every give-way. Anything that turns the map
+   *  to face the way you are going needs a number that survives those,
+   *  or the map spins back to north every time you slow down - which is
+   *  worse than never turning at all. */
+  steadyHeadingDeg: number | null;
   speedMs: number | null;
   at: number;
 }
@@ -61,6 +70,11 @@ export function useLivePosition(): LivePosition {
   // put down: see the idle check in the watch callback.
   const lastMoved = useRef<{ position: Point; at: number } | null>(null);
 
+  // The last heading worth believing, kept so the map has something to
+  // face while the car is stopped. Written and read only inside the
+  // watch callback, so it never participates in a render.
+  const steadyHeading = useRef<number | null>(null);
+
   // Support is not checked up front, deliberately. `navigator` doesn't
   // exist on the server, so testing for it during render would make the
   // first client render disagree with the markup sent down, and testing
@@ -77,6 +91,7 @@ export function useLivePosition(): LivePosition {
     setFix(null);
     setMessage(null);
     lastMoved.current = null;
+    steadyHeading.current = null;
   }, []);
 
   const start = useCallback(() => {
@@ -92,6 +107,7 @@ export function useLivePosition(): LivePosition {
     setStatus("starting");
     setMessage(null);
     lastMoved.current = null;
+    steadyHeading.current = null;
 
     watchId.current = navigator.geolocation.watchPosition(
       (position) => {
@@ -123,13 +139,17 @@ export function useLivePosition(): LivePosition {
           return;
         }
 
+        const course = usableHeading(heading, speed);
+        if (course !== null) steadyHeading.current = course;
+
         setStatus("active");
         setMessage(null);
         setFix({
           position: here,
           accuracyM: Number.isFinite(accuracy) ? accuracy : null,
           grade: gradeAccuracy(Number.isFinite(accuracy) ? accuracy : null),
-          headingDeg: usableHeading(heading, speed),
+          headingDeg: course,
+          steadyHeadingDeg: steadyHeading.current,
           speedMs: Number.isFinite(speed) ? speed : null,
           at: now,
         });

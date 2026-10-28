@@ -148,6 +148,7 @@ export function RotatedMapFrame({
     <div ref={frameRef} className={`relative overflow-hidden ${className ?? ""}`}>
       {ready && size && (
         <div
+          className="map-rotation"
           style={{
             position: "absolute",
             width: side,

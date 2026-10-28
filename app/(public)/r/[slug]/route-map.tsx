@@ -223,6 +223,26 @@ export function RouteMap({
         })()
       : null;
 
+  // Which way is up.
+  //
+  // Normally the resort's own bearing - walking in from the entrance is
+  // up the page - which is right for someone standing at the gate
+  // reading a map. It is wrong for someone driving, and wrong in the
+  // one moment that matters: at a junction, on a map that is not facing
+  // the way you are, left and right are a puzzle rather than a glance.
+  //
+  // So while a trip is running the map turns to the direction of travel
+  // instead. Rounded to fifteen degrees, which is fine enough that a
+  // turn reads correctly and coarse enough that the map is not
+  // re-rendered, and every label on it re-cached, for every wobble of
+  // the compass.
+  const MAP_BEARING_STEP_DEG = 15;
+  const travelBearing = live.active ? live.fix?.steadyHeadingDeg ?? null : null;
+  const mapBearingDeg =
+    travelBearing === null
+      ? bearingDeg
+      : (Math.round(travelBearing / MAP_BEARING_STEP_DEG) * MAP_BEARING_STEP_DEG + 360) % 360;
+
   // Everything the finished map needs is either here or it isn't coming.
   const preparing =
     selectedSite !== null &&
@@ -431,7 +451,7 @@ export function RouteMap({
               // all - they were being downloaded and then covered over
               // by an opaque drawing nobody could see past.
               showBasemap={plan === null || planImageUrl === null || planImageFailed}
-              bearingDeg={bearingDeg}
+              bearingDeg={mapBearingDeg}
               boundary={boundary}
               livePosition={live.active ? live.fix?.position ?? null : null}
               liveAccuracyM={live.active ? live.fix?.accuracyM ?? null : null}

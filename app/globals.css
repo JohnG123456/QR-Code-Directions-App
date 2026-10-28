@@ -163,3 +163,22 @@ a:focus-visible {
     transform: none;
   }
 }
+
+/* The map turning to face the way a visitor is driving.
+ *
+ * This bearing used to be fixed - walking in from the entrance was up
+ * the page - and needed no easing because it never moved. While a trip
+ * is being followed it now tracks the direction of travel in fifteen
+ * degree steps, and un-eased those steps arrive as a series of jolts.
+ * Over a third of a second a turn instead reads as the map coming round
+ * with you.
+ */
+.map-rotation {
+  transition: transform 350ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-rotation {
+    transition: none;
+  }
+}

@@ -95,6 +95,9 @@ export function PositionSimulator({
         // Through the same check a real fix goes through, so a parked
         // car gets no heading here either.
         headingDeg: usableHeading(point.headingDeg, speedMs),
+        // The rig always knows which way the route runs, even paused,
+        // so the steady heading is simply that.
+        steadyHeadingDeg: point.headingDeg,
         speedMs,
         at: Date.now(),
       });
