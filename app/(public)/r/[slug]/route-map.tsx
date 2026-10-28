@@ -231,7 +231,13 @@ export function RouteMap({
     (routeState !== "done" || !planImageReady);
 
   function reset() {
-    live.stop();
+    // Retarget rather than stop while a trip is running. "Another site"
+    // is how someone standing at the first house goes looking for the
+    // second, and the receiver is already on - dropping it here means
+    // asking for the permission again and starting from the entrance,
+    // which is the thing they have just finished driving away from.
+    if (live.active) live.retarget(null);
+    else live.stop();
     setQuery("");
     setSelectedId(null);
     setRoute(null);
@@ -257,10 +263,11 @@ export function RouteMap({
           placeholder="Enter your site number"
           value={query}
           onChange={(e) => {
-            // Typing here clears the chosen site, so it also ends any
-            // trip in progress: following someone to a destination they
-            // have just abandoned is worse than not following them.
-            live.stop();
+            // Typing clears the chosen house, so the route goes with
+            // it - but not the receiver. They are mid-search, standing
+            // where the last set of directions left them.
+            if (live.active) live.retarget(null);
+            else live.stop();
             setQuery(e.target.value);
             setSelectedId(null);
             setRoute(null);
@@ -277,7 +284,11 @@ export function RouteMap({
                 <button
                   type="button"
                   onClick={() => {
-                    live.stop();
+                    // The one that matters: a trip already running is
+                    // pointed at the new house and carries on from where
+                    // the visitor is, instead of restarting at the gate.
+                    if (live.active) live.retarget(site.id);
+                    else live.stop();
                     setSelectedId(site.id);
                     setQuery(site.site_number);
                     setRevealTimedOut(false);

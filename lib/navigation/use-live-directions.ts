@@ -51,6 +51,15 @@ export interface LiveDirections {
   /** A new route is being worked out because the visitor has left the
    *  one they were given - a wrong turn, usually. */
   rerouting: boolean;
+  /** Point an already-running trip at a different house.
+   *
+   *  The receiver stays on and the permission is not asked for again -
+   *  only the destination changes. Someone standing at the first house
+   *  looking up the second is already being followed; making them press
+   *  Follow me again, and sending them back to directions from the
+   *  entrance in the meantime, throws away the one thing the page
+   *  already knew. Pass null while they are still typing. */
+  retarget: (siteId: string | null) => void;
   /** This deployment's database hasn't got route_from_point yet. */
   unsupportedByServer: boolean;
   /** What the receiver is currently reporting, for the on-screen
@@ -203,21 +212,47 @@ export function useLiveDirections(
     offRouteFixes.current = 0;
   }, [stopWatch, simulating]);
 
+  /** Clears everything about the route being followed, and starts a
+   *  fresh recording, without touching the receiver. Shared by start and
+   *  retarget, which differ only in whether the watch is already on. */
+  const beginTrip = useCallback(
+    (destinationId: string | null) => {
+      recorder.current?.stop();
+      recorder.current =
+        resortId != null
+          ? new DiagnosticsRecorder(newSessionId(), resortId, destinationId, recordDiagnostics)
+          : null;
+      recorder.current?.start();
+      recordedAt.current = null;
+      setRoute(null);
+      setUnplaced(false);
+      setRerouting(false);
+      if (rerouteTimer.current !== null) {
+        clearTimeout(rerouteTimer.current);
+        rerouteTimer.current = null;
+      }
+      routedFrom.current = null;
+      routedAt.current = null;
+      offRouteFixes.current = 0;
+    },
+    [resortId, recordDiagnostics]
+  );
+
   const start = useCallback(() => {
-    recorder.current?.stop();
-    recorder.current =
-      resortId != null
-        ? new DiagnosticsRecorder(newSessionId(), resortId, siteId, recordDiagnostics)
-        : null;
-    recorder.current?.start();
-    recordedAt.current = null;
-    setUnplaced(false);
-    routedFrom.current = null;
-    routedAt.current = null;
-    offRouteFixes.current = 0;
+    beginTrip(siteId);
     setRequested(true);
     if (!simulating) startWatch();
-  }, [startWatch, simulating, resortId, siteId, recordDiagnostics]);
+  }, [beginTrip, startWatch, simulating, siteId]);
+
+  const retarget = useCallback(
+    (nextSiteId: string | null) => {
+      // Deliberately leaves `requested` and the watch alone: that is the
+      // whole point. A new destination is a new trip for the recording,
+      // and nothing at all for the receiver.
+      beginTrip(nextSiteId);
+    },
+    [beginTrip]
+  );
 
   useEffect(() => {
     if (!active || !fix || !siteId || !site) return;
@@ -371,6 +406,7 @@ export function useLiveDirections(
     unplaced,
     coarse,
     rerouting,
+    retarget,
     unsupportedByServer,
     readout: {
       offsetM: projection?.offsetM ?? null,
