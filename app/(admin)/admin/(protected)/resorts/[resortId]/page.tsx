@@ -154,6 +154,8 @@ export default async function ResortDetailPage({
       <DiagnosticsPanel
         resortId={resort.id}
         recording={diagnostics.recording === true}
+        recordingUntil={diagnostics.recordingUntil}
+        sessions={diagnostics.sessions}
         rowCount={diagnostics.recording === null ? null : diagnostics.rowCount}
         openUntil={diagnostics.openUntil}
         setRecordDiagnostics={setRecordDiagnostics}

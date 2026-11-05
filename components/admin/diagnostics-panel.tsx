@@ -16,6 +16,8 @@ import type {
 export function DiagnosticsPanel({
   resortId,
   recording,
+  recordingUntil,
+  sessions,
   rowCount,
   openUntil,
   setRecordDiagnostics,
@@ -23,6 +25,10 @@ export function DiagnosticsPanel({
 }: {
   resortId: string;
   recording: boolean;
+  /** When the current session stops by itself (migration 0018). */
+  recordingUntil: string | null;
+  /** Whether the database runs recording in timed sessions (0018). */
+  sessions: boolean;
   /** How much has been collected for this resort so far. */
   rowCount: number | null;
   /** The date after which the database stops accepting these, whatever
@@ -31,6 +37,7 @@ export function DiagnosticsPanel({
   setRecordDiagnostics: (input: {
     resortId: string;
     on: boolean;
+    hours?: number;
   }) => Promise<DiagnosticsOutcome>;
   clearDiagnostics: (input: { resortId: string }) => Promise<DiagnosticsOutcome>;
 }) {
@@ -40,12 +47,19 @@ export function DiagnosticsPanel({
   // Which action is running, so each button can say what it is doing
   // rather than all of them going quiet together.
   const [busy, setBusy] = useState<"toggle" | "clear" | null>(null);
+  // How long the next session runs. Short by default: it is meant for
+  // one afternoon's test driving, and stops by itself either way.
+  const [hours, setHours] = useState(4);
 
   function toggle() {
     setError(null);
     setBusy("toggle");
     startTransition(async () => {
-      const result = await setRecordDiagnostics({ resortId, on: !recording });
+      const result = await setRecordDiagnostics({
+        resortId,
+        on: !recording,
+        ...(sessions && !recording ? { hours } : {}),
+      });
       if (!result.ok) setError(result.error ?? "Couldn't change that.");
       setBusy(null);
     });
@@ -95,6 +109,30 @@ export function DiagnosticsPanel({
               : "Start recording"}
         </button>
 
+        {sessions && !recording && (
+          <label className="flex items-center gap-1.5 text-sm text-neutral-700">
+            for
+            <select
+              value={hours}
+              onChange={(e) => setHours(Number(e.target.value))}
+              disabled={isPending}
+              className="rounded border border-neutral-300 px-2 py-1.5"
+            >
+              {[1, 2, 4, 8, 12].map((h) => (
+                <option key={h} value={h}>
+                  {h} {h === 1 ? "hour" : "hours"}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {recording && recordingUntil && (
+          <span className="text-sm font-medium text-amber-800">
+            Stops by itself at {formatUntil(recordingUntil)}
+          </span>
+        )}
+
         <span className="text-sm text-neutral-600">
           {rowCount === null
             ? "Not set up on this database yet."
@@ -135,7 +173,16 @@ export function DiagnosticsPanel({
 
       {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
 
-      {openUntil && (
+      {sessions && (
+        <p className="mt-3 text-[13px] leading-snug text-neutral-500">
+          Each recording stops by itself at the end of the time you pick (12
+          hours at most), so it can&apos;t be left running over a resort full
+          of guests by forgetting about it. Recordings older than 30 days are
+          deleted automatically.
+        </p>
+      )}
+
+      {!sessions && openUntil && (
         <p className="mt-3 text-[13px] leading-snug text-neutral-500">
           Stops by itself after{" "}
           {new Date(openUntil).toLocaleDateString("en-AU", {
@@ -150,4 +197,21 @@ export function DiagnosticsPanel({
       )}
     </section>
   );
+}
+
+/** "2:30 pm", or "Tue 2:30 pm" when it isn't today. Pinned to Perth
+ *  time: the panel is first drawn on the server, which runs in UTC, and
+ *  every resort this serves is in WA. */
+function formatUntil(iso: string): string {
+  const zone = "Australia/Perth";
+  const when = new Date(iso);
+  const day = (d: Date) => d.toLocaleDateString("en-AU", { timeZone: zone });
+  const time = when.toLocaleTimeString("en-AU", {
+    timeZone: zone,
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return day(when) === day(new Date())
+    ? time
+    : `${when.toLocaleDateString("en-AU", { timeZone: zone, weekday: "short" })} ${time}`;
 }

@@ -115,7 +115,8 @@ The thresholds live directions turn on — twenty metres off the line,
 three fixes in a row, seventy-five metres to the nearest road — were
 picked from what consumer GPS does in general, not from what it does at
 a particular resort under a carport on a particular afternoon. Apply
-`0016_route_diagnostics.sql` and `0017_diagnostics_switch.sql`, then use
+`0016_route_diagnostics.sql`, `0017_diagnostics_switch.sql` and
+`0018_diagnostics_sessions.sql`, then use
 **Record live directions** on the resort's admin page to record the
 second thing. It is per resort, off by default, and takes effect on the
 next page a visitor loads — no redeploy, no environment variable.
@@ -132,24 +133,39 @@ Add `?diag=1` to a visitor URL to put the same figures on screen while
 driving. That only controls the display — recording does not need it,
 and a guest has no way to arrive at it by accident.
 
-**It stops by itself.** Three things have to hold for a row to be
-written, and the third does not depend on anyone remembering:
+**It stops by itself.** Starting a recording asks how long it should
+run (1–12 hours, 4 by default), and three things have to hold for a row
+to be written:
 
 1. Staff have switched it on for that resort.
 2. The resort is published.
-3. `now()` is before `route_diagnostics_open_until()` — a date fixed in
-   the migration. After it, the function accepts the call and writes
-   nothing.
+3. `now()` is before that resort's `record_diagnostics_until` — the end
+   of the session. After it, the database accepts the call and writes
+   nothing, whatever the switch says.
 
 All three are checked again inside the database on every write, so a
-page held open after the switch was turned off stops being recorded
-without needing to be closed.
+page held open after the switch was turned off, or after the session
+ran out, stops being recorded without needing to be closed. The 12-hour
+ceiling is enforced by a trigger on `resorts`, not by the app, so it
+holds whoever writes to the table.
 
-That third one is the point. A location recording is a reasonable thing
-to run over a fortnight of internal testing and an unreasonable thing to
+The third one is the point. A location recording is a reasonable thing
+to run over an afternoon of test driving and an unreasonable thing to
 leave running over a resort full of guests, and the difference between
-those two is usually nothing more than somebody forgetting. Extending it
-means editing the date in a migration, on purpose.
+those two is usually nothing more than somebody forgetting. With a
+session end time, forgetting costs an afternoon at most.
+
+*History:* until 0018 the third check was a single fixed date
+(31 December 2026) for every resort, set in `0016`. That assumed tuning
+was a one-off; once calibration became a step for every new resort and
+stage, it meant a database change before each one, while still letting
+a forgotten switch run for weeks. 0018 replaced it with per-session end
+times and dropped `route_diagnostics_open_until()`.
+
+**Old recordings are deleted automatically.** The daily cron
+(`/api/cron/keepalive`) deletes rows older than 30 days, so test drives
+nobody remembered to clear don't pile up. Change
+`DIAGNOSTICS_RETENTION_DAYS` in that route to keep them longer.
 
 Nothing stored identifies a person: no account, no device id, no IP, no
 user agent. The session id is random per trip, is not kept on the phone,
@@ -192,7 +208,8 @@ select recorded_at, event, round(offset_m::numeric,1) as off_m,
 
 **When the tuning is done:** turn the switch off and use **Delete them**
 on the same panel, which clears that resort's rows. The table can stay —
-the date stops it either way.
+the session end time stops it either way, and anything left is deleted
+after 30 days.
 
 ### What runs on every visitor request, and what doesn't
 

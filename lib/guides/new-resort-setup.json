@@ -142,14 +142,14 @@
       "title": "Calibrate live directions with test drives",
       "where": "Resort page → Record live directions",
       "do": [
-        "Check the resort is published. Recording only works on a published resort, and only until the cut-off date shown at the bottom of the panel.",
-        "Press **Start recording**.",
+        "Check the resort is published. Recording only works on a published resort.",
+        "Pick how long to record for (**4 hours** suits an afternoon of test drives; 12 hours at most) and press **Start recording**. It stops by itself at that time, even if nobody presses stop.",
         "On a phone, open the resort's link with **?diag=1** on the end (e.g. …/r/your-slug?diag=1). This shows the live figures on screen. Guests never see them.",
         "Search for a site, press **Follow me as I go**, and drive in from the gate. A passenger holds the phone and watches the figures, not the driver.",
         "Do **at least five drives** to different parts of the resort: the far end, a cul-de-sac, a tight corner, and streets under carports or heavy tree cover. In one of them, take a **deliberate wrong turn**.",
         "Note anywhere the screen said **Rerouting…** while you were on the right road, or didn't say it after the wrong turn. Also note whether it said you'd arrived at the right house.",
         "Press **Recording — tap to stop** when you're done.",
-        "Read the results (below). Once they've been checked and written down, press **Delete them**."
+        "Read the results (below). Once they've been checked and written down, press **Delete them**. Anything you forget to delete is cleared automatically after 30 days."
       ],
       "checks": {
         "title": "Reading the results",
@@ -162,7 +162,7 @@
           "**Unplaced:** these are moments the phone couldn't be matched to a road. A few is normal. Lots of them means a road is missing from the network, or GPS is very poor in that area."
         ]
       },
-      "watch": "Recording doesn't change anything by itself. The wrong-turn settings (20 m off the line, three readings in a row) are shared by every resort and are set in the app's code. If a resort fails, record the figures and get a developer to adjust the settings, then drive the other resorts again, because the change applies to all of them. The recording switches itself off on **31 December 2026**. Any resort calibrated after that needs the cut-off date extended in the database first."
+      "watch": "Recording doesn't change anything by itself. The wrong-turn settings (20 m off the line, three readings in a row) are shared by every resort and are set in the app's code. If a resort fails, record the figures and get a developer to adjust the settings, then drive the other resorts again, because the change applies to all of them. While recording is on, any guest who uses **Follow me as I go** at that resort is recorded too (no names or device details). Keep sessions to the time you're actually driving."
     },
     {
       "id": "qr",

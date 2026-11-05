@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- plain Node script, run directly */
 // Rebuilds docs/New-Resort-Setup-Guide.docx from lib/guides/new-resort-setup.json,
 // the same file the admin Setup guide page reads, so the two never disagree.
 // Run after editing the guide:
