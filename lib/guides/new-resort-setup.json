@@ -134,8 +134,35 @@
         "Open the link on a phone (not the computer you set it up on).",
         "Search for several site numbers: the first, the last, a few at the back of the resort and a few near the entrance.",
         "Check the route follows the roads to the right house, and that the plan covers the whole route with no blank areas.",
-        "If you can, test **Follow me as I go** by driving in from the gate."
+        "Live directions (**Follow me as I go**) are tested properly in the next step."
       ]
+    },
+    {
+      "id": "calibrate",
+      "title": "Calibrate live directions with test drives",
+      "where": "Resort page → Record live directions",
+      "do": [
+        "Check the resort is published. Recording only works on a published resort, and only until the cut-off date shown at the bottom of the panel.",
+        "Press **Start recording**.",
+        "On a phone, open the resort's link with **?diag=1** on the end (e.g. …/r/your-slug?diag=1). This shows the live figures on screen. Guests never see them.",
+        "Search for a site, press **Follow me as I go**, and drive in from the gate. A passenger holds the phone and watches the figures, not the driver.",
+        "Do **at least five drives** to different parts of the resort: the far end, a cul-de-sac, a tight corner, and streets under carports or heavy tree cover. In one of them, take a **deliberate wrong turn**.",
+        "Note anywhere the screen said **Rerouting…** while you were on the right road, or didn't say it after the wrong turn. Also note whether it said you'd arrived at the right house.",
+        "Press **Recording — tap to stop** when you're done.",
+        "Read the results (below). Once they've been checked and written down, press **Delete them**."
+      ],
+      "checks": {
+        "title": "Reading the results",
+        "intro": "Run this in Supabase (SQL editor), with the resort's slug in place of your-slug. It sums up every recorded drive for that resort.",
+        "query": "select\n  count(*) filter (where event = 'fix') as fixes,\n  count(distinct session_id) as drives,\n  round((percentile_cont(0.5) within group (order by accuracy_m)\n    filter (where event <> 'reroute'))::numeric, 1) as typical_accuracy_m,\n  round((percentile_cont(0.95) within group (order by accuracy_m)\n    filter (where event <> 'reroute'))::numeric, 1) as worst_5pc_accuracy_m,\n  round((percentile_cont(0.9) within group (order by offset_m)\n    filter (where event = 'fix'))::numeric, 1) as off_line_90pc_m,\n  count(*) filter (where event = 'reroute') as reroutes,\n  count(*) filter (where event = 'unplaced') as unplaced\nfrom route_diagnostics d\njoin resorts r on r.id = d.resort_id\nwhere r.slug = 'your-slug';",
+        "items": [
+          "**Good enough to use:** typical accuracy under about 10 m, the worst 5% under 25 m, and the 90% off-line figure comfortably under 20 m. Follow-me will work well here.",
+          "**Usable, with weak spots:** the worst 5% between 25 m and 100 m. Guests will sometimes see 'accuracy is poor'. Note which streets it happened on (usually heavy tree cover or carports).",
+          "**Wrong-turn warnings:** the number of reroutes should roughly match the wrong turns you actually took. If there are extra reroutes, or the 90% off-line figure is close to 20 m, it is warning on GPS noise. Don't put follow-me in front of guests until that's fixed.",
+          "**Unplaced:** these are moments the phone couldn't be matched to a road. A few is normal. Lots of them means a road is missing from the network, or GPS is very poor in that area."
+        ]
+      },
+      "watch": "Recording doesn't change anything by itself. The wrong-turn settings (20 m off the line, three readings in a row) are shared by every resort and are set in the app's code. If a resort fails, record the figures and get a developer to adjust the settings, then drive the other resorts again, because the change applies to all of them. The recording switches itself off on **31 December 2026**. Any resort calibrated after that needs the cut-off date extended in the database first."
     },
     {
       "id": "qr",
@@ -163,6 +190,7 @@
     "items": [
       "**New homes built or numbers changed:** edit them in **Capture sites (Satellite map)**, activate them under **Sites**, then **Reconnect all** under **Road network**.",
       "**New road built:** draw it in **Road network**, then press **Connect … sites** (or **Reconnect all** if existing homes should now use it).",
+      "**New stage opened or roads changed:** do two or three test drives with recording on through the changed area, and check the results again.",
       "**New revision of the master plan:** run **Import from master plan** again, then check the pins, then **Publish again** on the resort page.",
       "**Never change the URL slug** of a resort with printed QR codes.",
       "**Resort being removed:** **Delete resort** deletes all its sites as well, and its QR code stops working. Take a backup first."

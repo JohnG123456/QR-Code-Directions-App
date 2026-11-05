@@ -30,6 +30,18 @@ g.steps.forEach((s, i) => {
   kids.push(new Paragraph({ heading: HeadingLevel.HEADING_1, children: [new TextRun(`${i + 1}. ${s.title}`)] }));
   kids.push(new Paragraph({ spacing: { after: 120 }, children: [new TextRun({ text: 'Where: ', bold: true, color: '555555', size: 20 }), new TextRun({ text: s.where, color: '555555', size: 20 })] }));
   s.do.forEach(t => kids.push(new Paragraph({ numbering: { reference: 'n-' + s.id, level: 0 }, spacing: { after: 80 }, children: runs(t) })));
+  if (s.checks) {
+    kids.push(new Paragraph({ spacing: { before: 160, after: 80 }, keepNext: true, children: [new TextRun({ text: s.checks.title, bold: true, size: 23 })] }));
+    kids.push(new Paragraph({ spacing: { after: 80 }, children: runs(s.checks.intro) }));
+    const lines = s.checks.query.split('\n');
+    lines.forEach((line, n) => kids.push(new Paragraph({
+      spacing: { after: 0, before: 0 }, keepLines: true, keepNext: n < lines.length - 1,
+      shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'F2F2F2' }, indent: { left: 120, right: 120 },
+      children: [new TextRun({ text: line.replace(/^ +/, m => ' '.repeat(m.length)) || ' ', font: 'Consolas', size: 17 })],
+    })));
+    kids.push(new Paragraph({ spacing: { after: 80 }, children: [] }));
+    s.checks.items.forEach(t => kids.push(bullet(t)));
+  }
   if (s.watch) kids.push(new Paragraph({
     spacing: { before: 120, after: 120 }, indent: { left: 120, right: 120 },
     shading: { type: ShadingType.CLEAR, color: 'auto', fill: 'FFF4DC' },

@@ -76,6 +76,20 @@ export default function SetupGuidePage() {
                 <li key={i}>{withBold(line)}</li>
               ))}
             </ol>
+            {"checks" in step && step.checks && (
+              <div className="mt-4 rounded-md bg-neutral-50 p-3">
+                <h3 className="text-sm font-semibold">{step.checks.title}</h3>
+                <p className="mt-1 text-sm text-neutral-700">{withBold(step.checks.intro)}</p>
+                <pre className="mt-2 overflow-x-auto rounded-md border border-neutral-200 bg-white p-3 text-xs leading-relaxed text-neutral-800">
+                  <code>{step.checks.query}</code>
+                </pre>
+                <ul className="mt-3 flex list-disc flex-col gap-1.5 pl-5 text-sm text-neutral-700">
+                  {step.checks.items.map((item, i) => (
+                    <li key={i}>{withBold(item)}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             {"watch" in step && step.watch && (
               <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900">
                 <strong>Watch out:</strong> {withBold(step.watch)}
