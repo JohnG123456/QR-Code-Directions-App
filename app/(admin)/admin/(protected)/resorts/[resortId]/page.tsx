@@ -82,6 +82,13 @@ export default async function ResortDetailPage({
           ← All resorts
         </Link>
         <h1 className="mt-1 text-xl font-semibold">{resort.name}</h1>
+        <p className="mt-1 text-sm text-neutral-500">
+          Not sure what to do next?{" "}
+          <Link href="/admin/guide" className="text-neutral-900 underline">
+            Open the setup guide
+          </Link>
+          .
+        </p>
       </div>
 
       <div className="flex flex-wrap gap-3">

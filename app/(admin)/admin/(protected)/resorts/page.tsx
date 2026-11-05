@@ -18,6 +18,13 @@ export default async function ResortsPage() {
           Each resort gets its own QR code, entrance point, and set of
           sites.
         </p>
+        <p className="mt-1 text-sm text-neutral-500">
+          Setting up a new one?{" "}
+          <Link href="/admin/guide" className="text-neutral-900 underline">
+            Follow the step-by-step setup guide
+          </Link>
+          .
+        </p>
       </div>
 
       <ul className="divide-y divide-neutral-200 rounded-md border border-neutral-200">

@@ -54,6 +54,9 @@ export default async function ProtectedAdminLayout({
           Resort Directions Admin
         </Link>
         <div className="flex items-center gap-4 text-sm text-neutral-500">
+          <Link href="/admin/guide" className="hover:text-neutral-900">
+            Setup guide
+          </Link>
           <Link href="/admin/backup" className="hover:text-neutral-900">
             Backup
           </Link>

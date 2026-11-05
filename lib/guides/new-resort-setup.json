@@ -1,0 +1,171 @@
+{
+  "title": "Setting up a new resort",
+  "summary": "The order to do things in, from an empty resort to a QR code on the gate. Each step depends on the ones before it, so work down the list. Text in bold is the button or field name exactly as it appears on screen.",
+  "lastReviewed": "November 2026",
+  "before": {
+    "title": "Before you start, have these ready",
+    "items": [
+      "The resort's **master plan as a PDF**, drawn to scale. The importer only reads page 1, so make sure the site layout is on the first page. The sheet must cover the entrance, every site and all the roads between them: visitors only see what is on the sheet.",
+      "The **lowest and highest site numbers** at the resort. You use them to clear out lot numbers and other stray figures the scan picks up.",
+      "The **total number of homes** (built and planned), so the capture tools can show progress.",
+      "Where the **front entrance** is. You'll click it on a satellite map.",
+      "A staff login for the admin area. If you can't get in, an administrator has to add you. There is no self sign-up."
+    ]
+  },
+  "steps": [
+    {
+      "id": "create",
+      "title": "Create the resort",
+      "where": "Resorts (home screen) → Add a resort",
+      "do": [
+        "Type the resort **Name**. The **URL slug** fills itself in from the name.",
+        "Check the slug before saving. It becomes the end of the QR code's web address (/r/your-slug).",
+        "Press **Create resort**, then open the resort from the list."
+      ],
+      "watch": "Treat the slug as permanent once a QR code has been printed. Changing it later changes the address, and every printed code will stop working."
+    },
+    {
+      "id": "settings",
+      "title": "Set the reference point and basic settings",
+      "where": "Resort page → Settings (bottom of the page)",
+      "do": [
+        "Under **Reference point**, click the map at the resort's entrance.",
+        "Enter **Total homes** (optional, but it turns on the capture progress counter).",
+        "Leave **Published** unticked for now.",
+        "Press **Save changes** and wait for the green **Saved** message."
+      ],
+      "watch": "Do this first. The master plan import, the road network and the boundary all measure from the reference point, and they won't open until it is set."
+    },
+    {
+      "id": "masterplan",
+      "title": "Import the sites from the master plan",
+      "where": "Resort page → Import from master plan",
+      "do": [
+        "Upload the master plan PDF. It is scanned for site numbers.",
+        "Enter the resort's lowest and highest site numbers and press **Remove the … outside it**. This clears lot numbers, levels and stage numbers in one go.",
+        "Zoom in and check the dots. Tap a dot to fix or remove a false one, and tap a blank spot to add a number the scan missed.",
+        "Press **Continue to calibration**.",
+        "Click a distinctive point on the plan (a road corner or an intersection), then click the same point on the satellite map. Do this for **at least 3 points, spread across the whole resort** (corners and far ends, not bunched together).",
+        "Press **Compute positions** and read the fit figures. If it says the fit is loose, go back and re-pick the worst point.",
+        "Check the pins against the imagery, then press **Import … sites as drafts**."
+      ],
+      "watch": "Two reference points always 'fit' perfectly, so the tool has no way to tell you one is wrong. Use three or more. Your progress is saved on the device you're using. If you might finish on a different device, press **Save this draft to my account**. Run this import once per plan revision only: running it again re-adds every number, including ones you've since deleted."
+    },
+    {
+      "id": "tidy",
+      "title": "Check and tidy the site pins",
+      "where": "Resort page → Capture sites (Satellite map)",
+      "do": [
+        "Work across the resort with the master plan laid over the imagery.",
+        "Tap a pin to correct its number, change its status or delete it (e.g. a clubhouse that was read as a site).",
+        "To move a pin, untick **Lock pins**, drag it, then tick it again.",
+        "Tap empty imagery to add a site the import missed.",
+        "Use the progress counter (e.g. '340 of 352 homes captured') to check that nothing is missing."
+      ],
+      "watch": "All corrections after the import happen here, not in the importer. Pin colours: amber = draft (not visible to guests), green = active, grey = inactive. For spot-checks on site you can use **Capture sites (GPS)**. If you already have coordinates in a spreadsheet, use **Import sites (CSV)**."
+    },
+    {
+      "id": "roads",
+      "title": "Trace the road network",
+      "where": "Resort page → Road network",
+      "do": [
+        "Choose **Draw roads**. Tap where a street starts, keep tapping along it, then press **Finish this road**.",
+        "To join a new road onto an existing one, tap the existing junction or anywhere along the existing road. The road is split at that point so the join is real.",
+        "Switch to **Select & fix**, tap the junction at the front gate and press **Set as entrance**. Every visitor route starts there.",
+        "Read the summary under the map. If it says junctions aren't connected to the entrance, press **Show me** and close the gap (usually a road that stops just short of another).",
+        "When it says **Every junction is reachable from the entrance**, press **Connect … sites** in the panel below the map to attach each home to its nearest road."
+      ],
+      "watch": "Any site not attached to a road gets a straight line instead of a route. If you move sites or re-trace roads later, come back and press **Reconnect all**. If a junction is ringed in amber, it didn't save: undo past it and redraw it, or reload the page."
+    },
+    {
+      "id": "boundary",
+      "title": "Draw the resort boundary",
+      "where": "Resort page → Resort boundary",
+      "do": [
+        "The map starts with a shape worked out from where the homes are. Adjust it, or press **Start again** and tap each corner around the perimeter.",
+        "Make sure it takes in the entrance and all facilities (clubhouse, visitor parking, etc.).",
+        "Press **Save boundary**."
+      ],
+      "watch": "Everything outside the boundary is greyed out on the visitor's map, so a boundary drawn too tight can cut off your own facilities."
+    },
+    {
+      "id": "rotation",
+      "title": "Check the map rotation (optional)",
+      "where": "Resort page → Settings → Map rotation",
+      "do": [
+        "Leave it blank for automatic. The automatic value is shown in the hint.",
+        "If the streets look slightly skewed on the visitor map, type that value in, nudge it a degree or two, and press **Save changes**."
+      ],
+      "watch": "The aim is that driving in from the entrance points up the screen."
+    },
+    {
+      "id": "activate",
+      "title": "Activate the sites",
+      "where": "Resort page → Sites",
+      "do": [
+        "Once the numbers and positions have been checked, press **Activate all … drafts**."
+      ],
+      "watch": "Guests only see **active** sites. Every imported site starts as a draft, so if you skip this step every search on the visitor page comes up empty."
+    },
+    {
+      "id": "plan",
+      "title": "Show the master plan to visitors",
+      "where": "Resort page → Master plan on the visitor page",
+      "do": [
+        "Press **Show plan to visitors**."
+      ],
+      "watch": "Any later edit to the plan isn't seen by guests until you press **Publish again**. The panel shows an amber note when the published copy is out of date."
+    },
+    {
+      "id": "publish",
+      "title": "Publish the resort",
+      "where": "Resort page → Settings",
+      "do": [
+        "Tick **Published** and press **Save changes**.",
+        "The green message should say guests scanning the QR code will reach the resort."
+      ],
+      "watch": "Until this is ticked, scanning the code shows 'not found'."
+    },
+    {
+      "id": "test",
+      "title": "Test it on a phone",
+      "where": "Resort page → QR code panel → the link under the code",
+      "do": [
+        "Open the link on a phone (not the computer you set it up on).",
+        "Search for several site numbers: the first, the last, a few at the back of the resort and a few near the entrance.",
+        "Check the route follows the roads to the right house, and that the plan covers the whole route with no blank areas.",
+        "If you can, test **Follow me as I go** by driving in from the gate."
+      ]
+    },
+    {
+      "id": "qr",
+      "title": "Download and print the QR code",
+      "where": "Resort page → QR code",
+      "do": [
+        "Make sure there is **no red warning** in the QR code panel. If there is, don't print. Fix the address first.",
+        "Use **Download SVG** for signage (anything over about 20 cm). **Download PNG** is fine for small printed cards.",
+        "Print at least 5 cm wide so it scans reliably at arm's length.",
+        "Scan the printed proof with a phone before ordering the final sign."
+      ]
+    },
+    {
+      "id": "backup",
+      "title": "Take a backup",
+      "where": "Backup (top of every admin page)",
+      "do": [
+        "Press **Download full backup (JSON)** and store the file somewhere other than Supabase (e.g. the shared drive)."
+      ],
+      "watch": "The site positions and traced roads take hours to recreate. Take a fresh backup after any big round of changes."
+    }
+  ],
+  "later": {
+    "title": "Keeping a resort up to date",
+    "items": [
+      "**New homes built or numbers changed:** edit them in **Capture sites (Satellite map)**, activate them under **Sites**, then **Reconnect all** under **Road network**.",
+      "**New road built:** draw it in **Road network**, then press **Connect … sites** (or **Reconnect all** if existing homes should now use it).",
+      "**New revision of the master plan:** run **Import from master plan** again, then check the pins, then **Publish again** on the resort page.",
+      "**Never change the URL slug** of a resort with printed QR codes.",
+      "**Resort being removed:** **Delete resort** deletes all its sites as well, and its QR code stops working. Take a backup first."
+    ]
+  }
+}

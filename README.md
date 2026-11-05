@@ -356,6 +356,11 @@ that as a refused permission and suggests opening it in Chrome or Safari.
   segment's `layout.tsx`. `resorts/[resortId]/import-masterplan` is the
   PDF master plan importer; `capture-map` is the satellite click-to-place
   tool; `capture-sites` is the GPS tool; `import-sites` is CSV import.
+- `app/(admin)/admin/(protected)/guide` — the step-by-step **new resort
+  setup guide**, linked from every admin page. Its words live in
+  `lib/guides/new-resort-setup.json`; `docs/New-Resort-Setup-Guide.docx` is
+  generated from the same file by `scripts/build-setup-guide-docx.cjs`, so
+  edit the JSON and re-run the script rather than editing the Word file.
 - `app/(public)/r/[slug]` — visitor landing page.
 - `app/api/resorts/[resortId]/qr` — QR PNG/SVG download endpoint.
 - `lib/supabase/` — browser/server/admin Supabase clients and the
